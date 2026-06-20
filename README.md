@@ -34,11 +34,17 @@ uv run uvicorn lull_api.main:app --reload          # http://localhost:8000  (/he
 Real ElevenLabs round-trip: copy `apps/api/.env.example` → `.env`, set `LULL_AUDIO_SOURCE=elevenlabs`
 and `LULL_ELEVENLABS_API_KEY`.
 
-**Mobile** (initialize once):
+**Mobile** (deps already reconciled via the workspace install):
 ```bash
-cd apps/mobile && npx expo install     # reconciles Expo SDK 52 deps
-npx expo start                         # set EXPO_PUBLIC_API_BASE for device/emulator host
+pnpm install                           # from repo root — installs the workspace
+cd apps/mobile
+cp .env.example .env                    # set EXPO_PUBLIC_API_BASE for your target (see below)
+pnpm exec expo start                    # --android / --ios / --web
 ```
+`EXPO_PUBLIC_API_BASE` — where the app reaches the API:
+- Android emulator → `http://10.0.2.2:8000`
+- Physical device (same Wi-Fi) → `http://<LAN-IP>:8000`
+- Web / iOS simulator → `http://localhost:8000`
 
 ## Docs
 - [`docs/PRD.md`](docs/PRD.md) — product requirements
