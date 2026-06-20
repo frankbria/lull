@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
-from lull_api.main import app
+from lull_api.audio import StubAudioSource
+from lull_api.main import app, get_source
 
 client = TestClient(app)
 
@@ -28,10 +29,14 @@ def test_script_rejects_unknown_component():
 
 
 def test_tts_stub_returns_playable_wav():
-    r = client.post("/tts", json={"text": "rest now, you are safe"})
-    assert r.status_code == 200
-    assert r.headers["content-type"] == "audio/wav"
-    assert r.content[:4] == b"RIFF"  # valid WAV header
+    app.dependency_overrides[get_source] = lambda: StubAudioSource()
+    try:
+        r = client.post("/tts", json={"text": "rest now, you are safe"})
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "audio/wav"
+        assert r.content[:4] == b"RIFF"  # valid WAV header
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_meditation_vs_hypnosis_opener_differs():

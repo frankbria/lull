@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
-from .audio import get_audio_source
+from .audio import AudioSource, AudioSourceError, get_audio_source
 from .config import settings
 from .scripts import TrackSpec, build_script
 
@@ -45,7 +45,9 @@ def generate_script(spec_in: TrackSpecIn) -> ScriptOut:
 
     chars = len(script)
     if chars > settings.max_script_chars:
-        raise HTTPException(status_code=422, detail=f"script exceeds {settings.max_script_chars} chars")
+        raise HTTPException(
+            status_code=422, detail=f"script exceeds {settings.max_script_chars} chars"
+        )
 
     return ScriptOut(
         script=script,
@@ -56,11 +58,27 @@ def generate_script(spec_in: TrackSpecIn) -> ScriptOut:
     )
 
 
+def get_source() -> AudioSource:
+    """Resolve the configured AudioSource; surface config errors as a clear 503."""
+    try:
+        return get_audio_source(settings)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503, detail={"message": str(exc), "retryable": False}
+        ) from exc
+
+
 @app.post("/tts")
-async def tts(body: TtsIn) -> Response:
+async def tts(body: TtsIn, source: AudioSource = Depends(get_source)) -> Response:
     """Render approved script text to audio via the configured AudioSource."""
+    # Hard char cap enforced BEFORE any (billable) outbound call.
     if len(body.text) > settings.max_script_chars:
         raise HTTPException(status_code=422, detail="text exceeds max_script_chars")
-    source = get_audio_source(settings)
-    audio = await source.synthesize(body.text)
+    try:
+        audio = await source.synthesize(body.text)
+    except AudioSourceError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"message": exc.message, "retryable": exc.retryable},
+        ) from exc
     return Response(content=audio, media_type=source.media_type)

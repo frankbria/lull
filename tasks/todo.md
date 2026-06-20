@@ -1,26 +1,20 @@
-# Issue #1 — P[0.1.1] Initialize Expo mobile app & run Sprint-0 harness
+# Issue #2 — P[0.1.2] Wire and verify real ElevenLabs TTS round-trip
 
-**Plan source:** self-authored (issue had AC, no detailed implementation plan).
-**Branch:** `feat/1-expo-mobile-init`
+**Plan source:** self-authored. **Branch:** `feat/2-elevenlabs-roundtrip`
 
 ## Adapted plan
-1. Create feature branch off `main`.
-2. `cd apps/mobile && npx expo install` — let Expo reconcile SDK 52 dependency versions; commit the
-   resulting `package.json` changes + `pnpm-lock.yaml`.
-3. Resolve anything `expo install` / `npx expo-doctor` flags (version mismatches, peer deps).
-4. Make the Sprint-0 harness **web-runnable** so the `/script`→`/tts` round-trip can be demo-verified
-   headlessly: branch the audio write path (`expo-file-system` is native-only) to use a Blob URL on
-   web. Keeps native path unchanged.
-5. Confirm/extend `EXPO_PUBLIC_API_BASE` documentation (emulator `10.0.2.2` / LAN IP) in README + a
-   `apps/mobile/.env.example`.
-6. Typecheck (`tsc --noEmit`) passes.
+1. Harden `apps/api/src/lull_api/audio.py` `ElevenLabsAudioSource`:
+   - Add an optional `transport` seam so the external boundary is testable without a live key.
+   - Map failures to a typed `AudioSourceError(message, status_code, retryable)`:
+     timeout → retryable; 401 → not retryable ("check API key"); 429 → retryable; 5xx → retryable.
+2. `apps/api/src/lull_api/main.py` `/tts`: catch `AudioSourceError` → clear HTTP status
+   (502/503/504) + `{detail, retryable}`; missing-key `RuntimeError` → 503. Keep char cap before the call.
+3. TDD: `tests/test_elevenlabs.py` via `httpx.MockTransport` — success returns bytes + correct request
+   shape (xi-api-key header, voice id in URL, text in body); 401/429/5xx/timeout → mapped status +
+   retryable flag; char cap rejected before any outbound call.
 
 ## Acceptance criteria
-- [ ] `npx expo install` reconciles SDK 52 deps — **verifiable here**
-- [ ] App boots on an Android device/emulator — **device-only; user verifies**
-- [ ] "Generate & play" calls `/script` then `/tts` and audio plays — **round-trip verifiable here; audible playback device-only**
-- [ ] `EXPO_PUBLIC_API_BASE` documented for emulator (10.0.2.2) / LAN IP — **verifiable here**
-
-## Demo-gate note
-Two ACs (device boot, audible playback) cannot be evidenced in this environment. Resolution chosen
-in Phase 4 below.
+- [ ] `LULL_AUDIO_SOURCE=elevenlabs` + key renders a real script to audio — **needs key (Phase 4)**
+- [ ] Audio plays end-to-end on device — **device-only (→ #24-style follow-up)**
+- [ ] Hard char cap + cost/time estimate enforced before the charge — **verifiable here**
+- [ ] API errors/timeouts return a clear, retryable error — **verifiable here**
