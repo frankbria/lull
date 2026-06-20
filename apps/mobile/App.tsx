@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Button,
@@ -23,9 +23,25 @@ export default function App() {
   const [result, setResult] = useState<ScriptResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // expo-audio's imperative players don't auto-release; track + clean up to avoid leaks.
+  const playerRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
+  const webUrlRef = useRef<string | null>(null);
+
+  function cleanupPlayback() {
+    playerRef.current?.remove();
+    playerRef.current = null;
+    if (webUrlRef.current) {
+      URL.revokeObjectURL(webUrlRef.current);
+      webUrlRef.current = null;
+    }
+  }
+
+  useEffect(() => cleanupPlayback, []);
+
   async function generateAndPlay() {
     setBusy(true);
     setError(null);
+    cleanupPlayback(); // release any prior player/Blob URL before a new run
     try {
       const sres = await fetch(`${API_BASE}/script`, {
         method: "POST",
@@ -45,7 +61,11 @@ export default function App() {
       const bytes = new Uint8Array(await tres.arrayBuffer());
 
       const uri = await audioUri(bytes);
-      createAudioPlayer(uri).play(); // ponytail: harness fire-and-forget; player GC'd after playback
+      if (Platform.OS === "web") webUrlRef.current = uri; // revoked on next run / unmount
+      // ponytail: web browsers may block play() here since the awaited fetches consume the
+      // click's user-activation — device playback is the real target (#24).
+      playerRef.current = createAudioPlayer(uri);
+      playerRef.current.play();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
