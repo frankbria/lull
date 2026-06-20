@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Lull",
+    "slug": "lull",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.lull.app"
+    },
+    "ios": {
+      "bundleIdentifier": "com.lull.app"
+    }
+  }
+}

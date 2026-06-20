@@ -1,0 +1,10 @@
+{
+  "name": "lull",
+  "private": true,
+  "description": "Lull — AI self-hypnosis/meditation audio app (working codename)",
+  "scripts": {
+    "api:dev": "cd apps/api && uv run uvicorn lull_api.main:app --reload",
+    "api:test": "cd apps/api && uv run pytest -q",
+    "mobile": "pnpm --filter mobile start"
+  }
+}
