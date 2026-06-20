@@ -6,7 +6,7 @@
 | **Owner** | Frank Bria |
 | **Last updated** | 2026-06-20 |
 | **Source** | `/home/frankbria/.claude/plans/i-want-to-create-shimmying-cray.md` |
-| **Public name** | TBD — deferred to before Sprint 6 (store-safe naming + domain workstream) |
+| **Public name** | TBD — deferred to before Sprint 6. Candidates + domain research in [`NAMING.md`](NAMING.md) |
 
 > **One-line:** A wellness app that generates personalized self-hypnosis and meditation audio
 > tracks from user-chosen components (AI script + ElevenLabs voice), built for the long,

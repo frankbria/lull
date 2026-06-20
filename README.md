@@ -16,3 +16,6 @@ Discovery complete. See [`docs/PRD.md`](docs/PRD.md) for the full product requir
 
 ## Docs
 - [`docs/PRD.md`](docs/PRD.md) — product requirements
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — sprints + risk gates
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — stack, pipeline, data model
+- [`docs/NAMING.md`](docs/NAMING.md) — naming & domain research (name deferred)
