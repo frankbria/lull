@@ -16,6 +16,16 @@ import httpx
 from .config import Settings
 
 
+class AudioSourceError(Exception):
+    """A synthesis failure with a clear, client-facing message and retry guidance."""
+
+    def __init__(self, message: str, *, status_code: int, retryable: bool) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code  # HTTP status the API should return
+        self.retryable = retryable
+
+
 class AudioSource(Protocol):
     media_type: str
 
@@ -44,20 +54,65 @@ class StubAudioSource:
 class ElevenLabsAudioSource:
     media_type = "audio/mpeg"
 
-    def __init__(self, api_key: str, voice_id: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        voice_id: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self._api_key = api_key
         self._voice_id = voice_id
+        self._transport = transport  # injected in tests to drive the external boundary
 
     async def synthesize(self, text: str) -> bytes:
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}"
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(
-                url,
-                headers={"xi-api-key": self._api_key, "accept": "audio/mpeg"},
-                json={"text": text, "model_id": "eleven_multilingual_v2"},
-            )
-            resp.raise_for_status()
-            return resp.content
+        try:
+            async with httpx.AsyncClient(timeout=300, transport=self._transport) as client:
+                resp = await client.post(
+                    url,
+                    headers={"xi-api-key": self._api_key, "accept": "audio/mpeg"},
+                    json={"text": text, "model_id": "eleven_multilingual_v2"},
+                )
+                resp.raise_for_status()
+                return resp.content
+        except httpx.TimeoutException as exc:
+            raise AudioSourceError(
+                "Voice service timed out — please try again.",
+                status_code=504,
+                retryable=True,
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise _map_status_error(exc.response.status_code) from exc
+        except httpx.RequestError as exc:
+            raise AudioSourceError(
+                "Could not reach the voice service — please try again.",
+                status_code=502,
+                retryable=True,
+            ) from exc
+
+
+def _map_status_error(code: int) -> AudioSourceError:
+    if code in (401, 403):
+        return AudioSourceError(
+            "Voice service rejected the API key.", status_code=502, retryable=False
+        )
+    if code == 429:
+        return AudioSourceError(
+            "Voice service is rate limited — please retry shortly.",
+            status_code=502,
+            retryable=True,
+        )
+    if code >= 500:
+        return AudioSourceError(
+            "Voice service is temporarily unavailable — please try again.",
+            status_code=502,
+            retryable=True,
+        )
+    return AudioSourceError(
+        f"Voice service returned an unexpected error ({code}).",
+        status_code=502,
+        retryable=False,
+    )
 
 
 def get_audio_source(settings: Settings) -> AudioSource:
