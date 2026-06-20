@@ -11,6 +11,9 @@
     },
     "ios": {
       "bundleIdentifier": "com.lull.app"
-    }
+    },
+    "plugins": [
+      "expo-audio"
+    ]
   }
 }
