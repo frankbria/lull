@@ -9,7 +9,9 @@ import {
   View,
 } from "react-native";
 import { createAudioPlayer } from "expo-audio";
-import * as FileSystem from "expo-file-system";
+// SDK 54 moved the classic file API (cacheDirectory/writeAsStringAsync) to the /legacy entry;
+// the new default export is the File/Directory API. Legacy is the minimal change here.
+import * as FileSystem from "expo-file-system/legacy";
 import { StatusBar } from "expo-status-bar";
 import { DEFAULT_SPEC, type ScriptResponse } from "@lull/shared";
 
@@ -105,7 +107,8 @@ function audioExt(contentType: string): "wav" | "mp3" {
 // Native: write the bytes to the cache as base64 and play the file.
 async function audioUri(bytes: Uint8Array, contentType: string): Promise<string> {
   if (Platform.OS === "web") {
-    const blob = new Blob([bytes], { type: contentType });
+    // Uint8Array is a valid BlobPart at runtime; cast past TS 5.9's stricter ArrayBuffer typing.
+    const blob = new Blob([bytes as BlobPart], { type: contentType });
     return URL.createObjectURL(blob);
   }
   const uri = `${FileSystem.cacheDirectory}lull-session.${audioExt(contentType)}`;
