@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db import get_db
@@ -117,7 +118,11 @@ def signup(body: SignupIn, db: Session = Depends(get_db)) -> TokenOut:
 
     user = User(email=email, password_hash=hash_password(body.password), age_verified=True)
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:  # concurrent signup with the same email raced past the check
+        db.rollback()
+        raise HTTPException(status_code=409, detail="email already registered") from exc
     db.refresh(user)
     return TokenOut(access_token=create_access_token(user.id))
 
@@ -155,8 +160,14 @@ def oauth(
             raise HTTPException(status_code=422, detail="must be 18 or older to create an account")
         user = User(email=email, age_verified=True)  # oauth-only: no local password
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        try:
+            db.commit()
+            db.refresh(user)
+        except IntegrityError:  # a concurrent sign-in created the same account first
+            db.rollback()
+            user = db.scalar(select(User).where(User.email == email))
+            if user is None:  # not a duplicate-key race — surface it
+                raise
     return TokenOut(access_token=create_access_token(user.id))
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -43,16 +43,11 @@ def record_generation(db: Session, user_id: uuid.UUID) -> int:
     return db.execute(stmt).scalar_one()
 
 
-def guest_within_limit(db: Session, guest_id: uuid.UUID) -> bool:
-    """Whether this guest still has a free generation left. Read-only — call BEFORE the billable
-    synth so a failed render doesn't burn the credit; record_guest_generation commits it after."""
-    used = db.scalar(select(GuestCredit.used).where(GuestCredit.guest_id == guest_id)) or 0
-    return used < GUEST_FREE_GENERATIONS
-
-
-def record_guest_generation(db: Session, guest_id: uuid.UUID) -> int:
-    """Increment the guest's counter after a successful generation; return the new total. Atomic
-    upsert (same pattern as record_generation) so concurrent requests can't lose a count."""
+def reserve_guest_generation(db: Session, guest_id: uuid.UUID) -> bool:
+    """Atomically claim a guest generation BEFORE the billable synth. Returns True if the claim is
+    within the free allowance, else False (caller rejects). The atomic upsert means two concurrent
+    first-requests can't both pass — one gets used=1 (True), the other used=2 (False). Pair with
+    release_guest_generation on synth failure so a failed render doesn't burn the credit."""
     stmt = (
         pg_insert(GuestCredit)
         .values(guest_id=guest_id, used=1)
@@ -62,4 +57,13 @@ def record_guest_generation(db: Session, guest_id: uuid.UUID) -> int:
         )
         .returning(GuestCredit.used)
     )
-    return db.execute(stmt).scalar_one()
+    return db.execute(stmt).scalar_one() <= GUEST_FREE_GENERATIONS
+
+
+def release_guest_generation(db: Session, guest_id: uuid.UUID) -> None:
+    """Give back a reserved guest generation (synth failed). Floors at 0 so it can't go negative."""
+    db.execute(
+        update(GuestCredit)
+        .where(GuestCredit.guest_id == guest_id, GuestCredit.used > 0)
+        .values(used=GuestCredit.used - 1)
+    )

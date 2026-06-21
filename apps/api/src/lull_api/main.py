@@ -13,10 +13,10 @@ from .auth import current_user_optional, router as auth_router
 from .config import settings
 from .db import get_db
 from .entitlements import (
-    guest_within_limit,
     has_access,
     record_generation,
-    record_guest_generation,
+    release_guest_generation,
+    reserve_guest_generation,
 )
 from .models import User
 from .scripts import TrackSpec, build_script
@@ -106,9 +106,9 @@ async def tts(
 
     Generation is gated (FR-A2/FR-A5): authenticated users go through has_access + the credit
     counter (free, non-blocking at launch); guests present a server-issued X-Guest-Token (from
-    POST /auth/guest) good for GUEST_FREE_GENERATIONS, then must create an account. Allowance is
-    *checked* before the billable synth and only *recorded* after it succeeds, so a failed render
-    never burns the free generation.
+    POST /auth/guest) good for GUEST_FREE_GENERATIONS, then must create an account. The guest
+    allowance is reserved atomically BEFORE the billable synth (so concurrent requests can't both
+    slip through) and released if the render fails (so a failure never burns the free generation).
     """
     # Hard char cap enforced BEFORE any (billable) outbound call.
     if len(body.text) > settings.max_script_chars:
@@ -129,20 +129,25 @@ async def tts(
             guest_id = decode_guest_token(x_guest_token)
         except jwt.InvalidTokenError as exc:
             raise HTTPException(status_code=401, detail="invalid guest token") from exc
-        if not guest_within_limit(db, guest_id):
+        if not reserve_guest_generation(db, guest_id):
+            db.commit()  # persist the (over-limit) attempt count
             raise HTTPException(
                 status_code=401, detail="free generation used — create an account to continue"
             )
+        db.commit()  # commit the reservation before the (slow, billable) synth
 
-    audio = await _synthesize(source, body.text)
+    try:
+        audio = await _synthesize(source, body.text)
+    except HTTPException:
+        if guest_id is not None:
+            release_guest_generation(db, guest_id)  # render failed → don't burn the free credit
+            db.commit()
+        raise
 
-    # Record only after a successful (billable) render.
+    # Authed credit counts successful generations only (free/non-blocking at launch).
     if user is not None:
         record_generation(db, user.id)
-    else:
-        assert guest_id is not None  # set in the guest branch above
-        record_guest_generation(db, guest_id)
-    db.commit()
+        db.commit()
 
     return Response(content=audio, media_type=source.media_type)
 
