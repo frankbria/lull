@@ -20,6 +20,7 @@ EXPECTED_TABLES = {
     "music_beds",
     "entitlements",
     "generation_credits",
+    "guest_credits",
 }
 
 

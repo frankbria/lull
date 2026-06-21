@@ -27,5 +27,15 @@ class Settings(BaseSettings):
     # Rough ElevenLabs cost estimate, USD per 1k characters (tune against real billing).
     cost_per_1k_chars_usd: float = 0.15
 
+    # Session JWT (HS256). Dev default is fine locally; MUST be overridden in staging/prod via
+    # LULL_JWT_SECRET. ponytail: a shared secret + expiry, not a key-rotation service.
+    jwt_secret: str = "dev-insecure-change-me-with-a-real-32B+-secret"
+    jwt_expire_minutes: int = 60 * 24 * 30  # 30 days — mobile sessions are long-lived
+
+    # Accepted audiences for provider id_token verification (the app's OAuth client ids).
+    # JSON lists, e.g. LULL_GOOGLE_CLIENT_IDS=["123.apps.googleusercontent.com"].
+    google_client_ids: list[str] = []
+    apple_client_ids: list[str] = []
+
 
 settings = Settings()
