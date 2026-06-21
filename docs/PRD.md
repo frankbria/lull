@@ -215,7 +215,7 @@ Full sprint roadmap lives in the approved plan; this PRD details MVP requirement
 ## 10. Risk gates / compliance (must clear before dependent work)
 
 1. **App/Play store policy (CRITICAL)** — store-safe language; KAP UI not built until policy stance
-   confirmed; keep a sideload/PWA fallback.
+   confirmed; keep a sideload/PWA fallback. → cleared: [`app-store-policy-stance.md`](app-store-policy-stance.md).
 2. **Attorney-reviewed consent + privacy policy (BLOCKER)** — health-adjacent + psychedelic context;
    not a generic template.
 3. **Panic-path reliability (catastrophic if it fails)** — verified on real devices in airplane mode,

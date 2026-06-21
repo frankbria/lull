@@ -18,7 +18,7 @@ Scheduling/reminders and the AI-chat builder slot in around Sprints 4-5. Marketi
 domain / pricing / social is a separate workstream after a usable MVP (Sprint 6+).
 
 ## Risk gates (block shipping)
-1. **App/Play store policy** — store-safe language; KAP UI not built until policy stance confirmed; keep sideload/PWA fallback.
+1. **App/Play store policy** — store-safe language; KAP UI not built until policy stance confirmed; keep sideload/PWA fallback. → [`app-store-policy-stance.md`](app-store-policy-stance.md) ✅ **cleared** (GO on wellness framing with conditions; Lull facilitates no sale and gives no dosing, so Apple §1.4.3 / Play "Marijuana" don't bite; Android APK+PWA fallback held).
 2. **Attorney-reviewed consent + privacy policy** — health-adjacent + psychedelic context.
 3. **Panic-path reliability** — native dialer, local contact, works airplane/DND/locked-screen; verified on real devices.
 4. **ElevenLabs cost + ToS** — char cap, preview-before-render, hash-and-cache, confirm caching permitted + pin ToS version. → [`elevenlabs-commercial-tos.md`](elevenlabs-commercial-tos.md) ✅ **cleared** (caching permitted on a paid plan; signed off, on Starter plan).
