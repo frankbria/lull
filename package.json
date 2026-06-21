@@ -1,6 +1,7 @@
 {
   "name": "lull",
   "private": true,
+  "packageManager": "pnpm@10.27.0",
   "description": "Lull — AI self-hypnosis/meditation audio app (working codename)",
   "scripts": {
     "api:dev": "cd apps/api && uv run uvicorn lull_api.main:app --reload",

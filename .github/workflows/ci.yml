@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref — cheaper, and re-runs are idempotent.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: api (ruff + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    # Tests connect to a real Postgres (no mocks). Mirrors apps/api/docker-compose.yml.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lull
+          POSTGRES_PASSWORD: lull
+          POSTGRES_DB: lull
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lull -d lull"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create test databases
+        env:
+          PGPASSWORD: lull
+        run: |
+          psql -h localhost -U lull -d lull -c 'CREATE DATABASE lull_test;'
+          psql -h localhost -U lull -d lull -c 'CREATE DATABASE lull_migtest;'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true              # caches uv's download/build cache
+          cache-dependency-glob: apps/api/uv.lock
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+
+  mobile:
+    name: mobile (typecheck + lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4         # version from root package.json packageManager
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm                       # caches the pnpm store
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter mobile typecheck
+      - run: pnpm --filter mobile lint
