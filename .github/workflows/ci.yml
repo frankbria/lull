@@ -17,8 +17,27 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    # Tests connect to a real Postgres (no mocks). Mirrors apps/api/docker-compose.yml.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lull
+          POSTGRES_PASSWORD: lull
+          POSTGRES_DB: lull
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lull -d lull"
+          --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
       - uses: actions/checkout@v4
+      - name: Create test databases
+        env:
+          PGPASSWORD: lull
+        run: |
+          psql -h localhost -U lull -d lull -c 'CREATE DATABASE lull_test;'
+          psql -h localhost -U lull -d lull -c 'CREATE DATABASE lull_migtest;'
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true              # caches uv's download/build cache
