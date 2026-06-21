@@ -1,52 +1,30 @@
-# Issue #5 / #32 — Python-native auth slice
+# P[0.1.6] CI pipeline (GitHub Actions) — Issue #6
 
-Closes the remaining scope of #5 (data layer shipped in #31). Implements #32.
+## Acceptance criteria
+- [ ] On PR: api `ruff` + `pytest`; mobile `tsc` typecheck + lint
+- [ ] Green required to merge; pipeline idempotent
+- [ ] Caches uv + pnpm for speed
 
-## Decisions (need sign-off)
-- **JWT/crypto lib: `pyjwt[crypto]` instead of Authlib.** Native mobile sign-in sends a
-  provider `id_token`; the backend only *verifies* it (RS256 against provider JWKS) and issues
-  our own session JWT (HS256). PyJWT covers both with one dep; Authlib's auth-code/redirect
-  machinery would be unused. `passlib[argon2]` for password hashing (as specified).
-- **OAuth shape: token-verification, not redirect flow.** `POST /auth/oauth/{provider}` takes
-  `{id_token, age_confirmed}`, verifies signature + audience + exp against Google/Apple JWKS,
-  extracts the verified email, upserts the user. Matches how Expo/RN native sign-in works.
-- **Account linking by verified email.** OAuth + email/pw with same (provider-verified) email →
-  same account. No schema change needed for OAuth (`password_hash` stays null for oauth-only).
-- **Generation gating wired into `/tts`** (the billable render), not `/script` (free text preview).
-- **Guest mode** enforced server-side via a client-supplied `X-Guest-Id` UUID + a small
-  `guest_credits` table (mirrors `GenerationCredit`): 1 free `/tts`, then 401 → prompt signup.
+## Adapted plan (monorepo: pnpm workspace + uv Python api)
 
-## Plan (TDD: RED → GREEN → REFACTOR per slice)
+1. **Mobile lint/typecheck scripts** (DONE locally, verified passing)
+   - Added devDeps `eslint@^9` + `eslint-config-expo` to `apps/mobile`
+   - `apps/mobile/eslint.config.js` (Expo flat config)
+   - `apps/mobile` scripts: `typecheck` = `tsc --noEmit`, `lint` = `eslint .`
 
-1. **Deps + settings** — add `pyjwt[crypto]`, `passlib[argon2]` to pyproject; add
-   `jwt_secret`, `jwt_expire_minutes`, `google_client_ids`, `apple_client_ids` to config;
-   document in `.env.example`.
-2. **security.py** — argon2 `hash_password`/`verify_password`; `create_access_token(user_id)` /
-   `decode_access_token` (HS256, exp).
-3. **GuestCredit model + migration** — `guest_credits {id, guest_id unique, used}`; Alembic
-   revision down_revision=1551d5331491. Migration round-trip test.
-4. **oauth.py** — `OAuthVerifier` seam (`get_oauth_verifier` dependency, like `get_source`):
-   prod impl verifies id_token via `PyJWKClient` per provider; returns verified email. Tests
-   override the dependency with a verifier backed by a real test RSA keypair (real RS256 verify,
-   test issuer key — no mocking of our code).
-5. **auth.py router** — `POST /auth/signup` (argon2, 18+ age gate → 422, dup → 409),
-   `POST /auth/login` (401 on bad creds), `POST /auth/oauth/{provider}`, `GET /auth/me`;
-   `current_user` (HTTPBearer→JWT→User) and `current_user_optional` deps.
-6. **Wire entitlements into `/tts`** — authed: `has_access` + `record_generation`; guest
-   (no token, `X-Guest-Id`): 1 free then 401. Include router in main.py.
-7. **Quality gate** — ruff + black + full pytest (real Postgres); cross-family review;
-   demo every AC with outcome evidence; CI; docs sync; PR → merge; close #5 + #32.
+2. **Root `packageManager` field** -> `pnpm@10.27.0` so `pnpm/action-setup` auto-detects.
 
-## Acceptance criteria (from #32) — all demoed with outcome evidence in PR #35
-- [x] Email/password signup + login (argon2 → `User.password_hash`)
-- [x] OAuth (Google + Apple) id_token verification
-- [x] 18+ age gate enforced at account creation (sets `User.age_verified`)
-- [x] JWT issuance + `current_user` FastAPI dependency
-- [x] Guest mode: one free generation before account creation (FR-A2)
-- [x] `record_generation()` / `has_access()` wired into the authed generation path
+3. **`.github/workflows/ci.yml`** — `on: pull_request` + `push: main`, with `concurrency`
+   (cancel stale runs = efficient + idempotent). Two independent jobs:
+   - **api** (`working-directory: apps/api`): `astral-sh/setup-uv` (enable-cache -> caches uv)
+     -> `uv sync` -> `uv run ruff check .` -> `uv run pytest -q`
+   - **mobile**: `pnpm/action-setup` -> `actions/setup-node` (`node-version-file: .nvmrc`,
+     `cache: pnpm`) -> `pnpm install --frozen-lockfile` -> `pnpm --filter mobile typecheck`
+     -> `pnpm --filter mobile lint`
+   - Jobs kept independent so follow-on #33 can drop in an `eas update` job on merge to main.
 
-## Status: PR #35 open (closes #32, completes #5). Follow-up: #36 (guest-abuse control).
+4. **Branch protection** ("green required to merge") is a GitHub repo setting, not code.
+   Note it in the PR; offer to set via `gh api` (needs admin).
 
-## Notes
-- Onboarding/consent flow (FR-O1..O4) is explicitly out of scope (Sprint-3 gate).
-- Test DB: `docker compose -f apps/api/docker-compose.yml up -d` (lull_test database).
+## Out of scope (YAGNI)
+- EAS Build / OTA (#33), deploy jobs, matrix builds, coverage gates.
