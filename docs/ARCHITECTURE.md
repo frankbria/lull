@@ -6,7 +6,11 @@ High-level shape for the MVP. Detail and rationale in [`PRD.md`](PRD.md) §9.
 - **Client:** Expo / React Native (TypeScript, strict). Android **foreground media service +
   MediaSession** for long background playback (built in Sprint 2, not retrofitted). Local audio
   cache + on-disk playback-position store.
-- **Backend:** FastAPI (Python, `uv`), **BetterAuth**, **PostgreSQL**.
+- **Backend:** FastAPI (Python, `uv`), **PostgreSQL** (SQLAlchemy 2.0 + Alembic migrations).
+  **Auth is Python-native** — Authlib (OAuth), passlib/argon2 (password hashing), JWT/session
+  tokens — kept in-process so the backend stays one language and one deploy unit. *(BetterAuth was
+  the original pick but is Node/TS-only; running it would mean a second runtime + cross-service
+  session verification, not worth it for a solo MVP on a shared VPS.)*
 - **Monorepo:** `apps/mobile` (Expo) · `apps/api` (FastAPI) · `packages/shared` (TS types shared
   across client/contract).
 

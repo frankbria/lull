@@ -160,7 +160,9 @@ Full sprint roadmap lives in the approved plan; this PRD details MVP requirement
 - **FR-S5** If no contact configured, show the national crisis line only.
 
 ### 7.6 Accounts & data
-- **FR-A1** Email/password + OAuth via BetterAuth; **18+ age gate** at account creation.
+- **FR-A1** Email/password + OAuth (Python-native auth in the FastAPI backend — Authlib for OAuth,
+  passlib/argon2 for password hashing, JWT/session tokens); **18+ age gate** at account creation.
+  *(BetterAuth was the original pick but is Node/TS-only; the backend is Python — see ARCHITECTURE.md.)*
 - **FR-A2** **Guest mode:** one free generation before account creation (conversion + privacy).
 - **FR-A3** Generated tracks saved to backend + local cache, account-scoped from day one.
 - **FR-A4** Account deletion + data export (GDPR/CCPA).
@@ -199,7 +201,8 @@ Full sprint roadmap lives in the approved plan; this PRD details MVP requirement
 
 - **Client:** Expo / React Native (TypeScript, strict). Android foreground media service +
   MediaSession (Sprint 2, not retrofitted). Local audio cache + position store.
-- **Backend:** FastAPI (Python, `uv`), BetterAuth, **PostgreSQL**.
+- **Backend:** FastAPI (Python, `uv`), Python-native auth (Authlib/passlib/JWT), **PostgreSQL**
+  (SQLAlchemy 2.0 + Alembic).
 - **Pipeline:** client → backend generation endpoint → LLM (script) → moderation pass → ElevenLabs
   (voice) → cached audio file (device + cloud).
 - **`AudioSource` abstraction:** a single interface fronts all audio (ElevenLabs cached now; real-time

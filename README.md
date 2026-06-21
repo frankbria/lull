@@ -11,7 +11,7 @@ contexts that mainstream apps refuse to support.
 Discovery complete. See [`docs/PRD.md`](docs/PRD.md) for the full product requirements.
 
 - **MVP:** Track Builder + Player (Sprints 0–2)
-- **Stack:** Expo / React Native (TS) · FastAPI · BetterAuth · PostgreSQL
+- **Stack:** Expo / React Native (TS) · FastAPI · PostgreSQL (SQLAlchemy + Alembic) · Python-native auth
 - **Audio:** pre-generate + cache via a pluggable `AudioSource` layer
 
 ## Repo layout
@@ -25,10 +25,17 @@ docs/         PRD, roadmap, architecture, naming research
 ```
 
 ## Develop
+**Database** (Postgres via Docker — also creates the `lull_test` / `lull_migtest` databases tests use):
+```bash
+docker compose -f apps/api/docker-compose.yml up -d        # local Postgres on :5432
+cd apps/api && uv run alembic upgrade head                 # apply migrations to the dev DB
+```
+Staging/prod: set `LULL_DATABASE_URL` to the managed/VPS Postgres DSN (overrides the local default).
+
 **API** (no key needed — runs on the stub AudioSource):
 ```bash
 cd apps/api && uv sync
-uv run pytest -q                                   # 5 passing
+uv run pytest -q                                   # 20 passing (needs the Postgres above)
 uv run uvicorn lull_api.main:app --reload          # http://localhost:8000  (/health, /script, /tts)
 ```
 Real ElevenLabs round-trip: copy `apps/api/.env.example` → `.env`, set `LULL_AUDIO_SOURCE=elevenlabs`
