@@ -8,7 +8,8 @@ services:
       POSTGRES_PASSWORD: lull
       POSTGRES_DB: lull
     ports:
-      - "5432:5432"
+      # Loopback-only: never expose dev Postgres (weak lull:lull creds) on a reachable interface.
+      - "127.0.0.1:5432:5432"
     volumes:
       - ./db-init:/docker-entrypoint-initdb.d:ro
       - lull_pgdata:/var/lib/postgresql/data

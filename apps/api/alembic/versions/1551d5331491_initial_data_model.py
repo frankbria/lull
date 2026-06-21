@@ -1,8 +1,8 @@
 """initial data model
 
-Revision ID: 6a5df6012d49
+Revision ID: 1551d5331491
 Revises:
-Create Date: 2026-06-20 19:23:20.591045
+Create Date: 2026-06-20 19:31:50.824935
 
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "6a5df6012d49"
+revision: str = "1551d5331491"
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -78,6 +78,7 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("id", "user_id", name="uq_tracks_id_user"),
     )
     op.create_table(
         "audio_files",
@@ -105,7 +106,9 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(["track_id"], ["tracks.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["track_id", "user_id"], ["tracks.id", "tracks.user_id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )

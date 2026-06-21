@@ -67,6 +67,18 @@ def test_cascade_delete_user_removes_tracks(db):
     assert db.scalars(select(Track).where(Track.user_id == u.id)).first() is None
 
 
+def test_session_log_rejects_foreign_track(db):
+    owner = _user(db, email="owner@b.co")
+    intruder = _user(db, email="intruder@b.co")
+    track = Track(user_id=owner.id, spec={}, status="ready")  # owned by `owner`
+    db.add(track)
+    db.flush()
+    # A session log claiming `intruder` played `owner`'s track must be rejected (composite FK).
+    db.add(SessionLog(user_id=intruder.id, track_id=track.id, position_seconds=1.0))
+    with pytest.raises(IntegrityError):
+        db.flush()
+
+
 def test_session_log_music_bed_entitlement_credit(db):
     u = _user(db)
     track = Track(user_id=u.id, spec={}, status="ready")

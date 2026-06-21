@@ -10,7 +10,18 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -38,6 +49,8 @@ class User(Base):
 
 class Track(Base):
     __tablename__ = "tracks"
+    # Lets SessionLog reference (track_id, user_id) so a log can't pair a track with a non-owner.
+    __table_args__ = (UniqueConstraint("id", "user_id", name="uq_tracks_id_user"),)
 
     id: Mapped[uuid.UUID] = _pk()
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
@@ -83,10 +96,21 @@ class AudioFile(Base):
 
 class SessionLog(Base):
     __tablename__ = "session_logs"
+    # Composite FK enforces account scoping: the (track_id, user_id) pair must match a real
+    # track owned by that user — a session log can't point at someone else's track.
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["track_id", "user_id"],
+            ["tracks.id", "tracks.user_id"],
+            ondelete="CASCADE",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = _pk()
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    track_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tracks.id", ondelete="CASCADE"))
+    track_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True)
+    )  # half of the composite FK above
     position_seconds: Mapped[float] = mapped_column(Float, default=0.0)
     partial: Mapped[bool] = mapped_column(Boolean, default=True)  # finished the track?
     rating: Mapped[int | None] = mapped_column(Integer, default=None)
