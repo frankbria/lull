@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 
+import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -11,9 +12,15 @@ from .audio import AudioSource, AudioSourceError, get_audio_source
 from .auth import current_user_optional, router as auth_router
 from .config import settings
 from .db import get_db
-from .entitlements import consume_guest_generation, has_access, record_generation
+from .entitlements import (
+    guest_within_limit,
+    has_access,
+    record_generation,
+    record_guest_generation,
+)
 from .models import User
 from .scripts import TrackSpec, build_script
+from .security import decode_guest_token
 
 app = FastAPI(title="Lull API", version="0.1.0")
 app.include_router(auth_router)
@@ -93,46 +100,58 @@ async def tts(
     source: AudioSource = Depends(get_source),
     user: User | None = Depends(current_user_optional),
     db: Session = Depends(get_db),
-    x_guest_id: str | None = Header(default=None),
+    x_guest_token: str | None = Header(default=None),
 ) -> Response:
     """Render approved script text to audio via the configured AudioSource.
 
     Generation is gated (FR-A2/FR-A5): authenticated users go through has_access + the credit
-    counter (free, non-blocking at launch); guests get GUEST_FREE_GENERATIONS via X-Guest-Id,
-    then must create an account. Gating runs BEFORE the billable synth call.
+    counter (free, non-blocking at launch); guests present a server-issued X-Guest-Token (from
+    POST /auth/guest) good for GUEST_FREE_GENERATIONS, then must create an account. Allowance is
+    *checked* before the billable synth and only *recorded* after it succeeds, so a failed render
+    never burns the free generation.
     """
     # Hard char cap enforced BEFORE any (billable) outbound call.
     if len(body.text) > settings.max_script_chars:
         raise HTTPException(status_code=422, detail="text exceeds max_script_chars")
 
+    guest_id: uuid.UUID | None = None
     if user is not None:
         if not has_access(db, user.id, "generation"):
             raise HTTPException(status_code=403, detail="generation not available on your plan")
-        record_generation(db, user.id)
-        db.commit()
     else:
-        if not x_guest_id:
+        if not x_guest_token:
             raise HTTPException(
                 status_code=401,
-                detail="sign in, or send X-Guest-Id to use your free generation",
+                detail="sign in, or call POST /auth/guest for a free generation",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         try:
-            guest_uuid = uuid.UUID(x_guest_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="invalid X-Guest-Id") from exc
-        if not consume_guest_generation(db, guest_uuid):
-            db.commit()  # persist the (over-limit) attempt count
+            guest_id = decode_guest_token(x_guest_token)
+        except jwt.InvalidTokenError as exc:
+            raise HTTPException(status_code=401, detail="invalid guest token") from exc
+        if not guest_within_limit(db, guest_id):
             raise HTTPException(
                 status_code=401, detail="free generation used — create an account to continue"
             )
-        db.commit()
 
+    audio = await _synthesize(source, body.text)
+
+    # Record only after a successful (billable) render.
+    if user is not None:
+        record_generation(db, user.id)
+    else:
+        assert guest_id is not None  # set in the guest branch above
+        record_guest_generation(db, guest_id)
+    db.commit()
+
+    return Response(content=audio, media_type=source.media_type)
+
+
+async def _synthesize(source: AudioSource, text: str) -> bytes:
     try:
-        audio = await source.synthesize(body.text)
+        return await source.synthesize(text)
     except AudioSourceError as exc:
         raise HTTPException(
             status_code=exc.status_code,
             detail={"message": exc.message, "retryable": exc.retryable},
         ) from exc
-    return Response(content=audio, media_type=source.media_type)

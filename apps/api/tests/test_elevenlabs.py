@@ -1,5 +1,3 @@
-import uuid
-
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -25,9 +23,10 @@ def _override(source) -> None:
     app.dependency_overrides[get_source] = lambda: source
 
 
-def _guest() -> dict[str, str]:
-    """A fresh guest id claims its one free generation; the transactional client rolls it back."""
-    return {"X-Guest-Id": str(uuid.uuid4())}
+def _guest(client) -> dict[str, str]:
+    """A fresh server-issued guest token claims one free generation; the transactional client
+    rolls it back."""
+    return {"X-Guest-Token": client.post("/auth/guest").json()["guest_token"]}
 
 
 def test_tts_success_sends_correct_request_and_returns_audio(client):
@@ -40,7 +39,7 @@ def test_tts_success_sends_correct_request_and_returns_audio(client):
         return httpx.Response(200, content=b"FAKEMP3", headers={"content-type": "audio/mpeg"})
 
     _override(_source_with(handler))
-    r = client.post("/tts", json={"text": "breathe and relax"}, headers=_guest())
+    r = client.post("/tts", json={"text": "breathe and relax"}, headers=_guest(client))
     assert r.status_code == 200
     assert r.content == b"FAKEMP3"
     assert r.headers["content-type"] == "audio/mpeg"
@@ -55,7 +54,7 @@ def test_tts_success_sends_correct_request_and_returns_audio(client):
 )
 def test_tts_maps_upstream_errors(client, code, exp_status, retryable):
     _override(_source_with(lambda req: httpx.Response(code, text="nope")))
-    r = client.post("/tts", json={"text": "hi"}, headers=_guest())
+    r = client.post("/tts", json={"text": "hi"}, headers=_guest(client))
     assert r.status_code == exp_status
     assert r.json()["detail"]["retryable"] is retryable
     assert r.json()["detail"]["message"]  # non-empty, human-readable
@@ -66,7 +65,7 @@ def test_tts_maps_timeout_to_retryable(client):
         raise httpx.ReadTimeout("timed out", request=request)
 
     _override(_source_with(handler))
-    r = client.post("/tts", json={"text": "hi"}, headers=_guest())
+    r = client.post("/tts", json={"text": "hi"}, headers=_guest(client))
     assert r.status_code == 504
     assert r.json()["detail"]["retryable"] is True
 

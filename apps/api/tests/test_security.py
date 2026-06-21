@@ -9,7 +9,9 @@ import pytest
 
 from lull_api.security import (
     create_access_token,
+    create_guest_token,
     decode_access_token,
+    decode_guest_token,
     hash_password,
     verify_password,
 )
@@ -33,3 +35,19 @@ def test_decode_rejects_tampered_token():
     token = create_access_token(uuid.uuid4())
     with pytest.raises(jwt.InvalidTokenError):
         decode_access_token(token + "x")
+
+
+def test_guest_token_roundtrip():
+    token, guest_id = create_guest_token()
+    assert decode_guest_token(token) == guest_id
+
+
+def test_guest_and_user_tokens_are_not_interchangeable():
+    # A guest token must not authenticate as a user, nor a user token pass as a guest.
+    guest_token, _ = create_guest_token()
+    with pytest.raises(jwt.InvalidTokenError):
+        decode_access_token(guest_token)
+
+    user_token = create_access_token(uuid.uuid4())
+    with pytest.raises(jwt.InvalidTokenError):
+        decode_guest_token(user_token)

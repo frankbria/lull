@@ -40,4 +40,32 @@ def create_access_token(user_id: uuid.UUID) -> str:
 def decode_access_token(token: str) -> uuid.UUID:
     """Return the user id from a valid token, or raise jwt.InvalidTokenError."""
     payload = jwt.decode(token, settings.jwt_secret, algorithms=[ALGORITHM])
+    if payload.get("typ") == "guest":
+        raise jwt.InvalidTokenError("guest token is not a user session")
+    return uuid.UUID(payload["sub"])
+
+
+def create_guest_token() -> tuple[str, uuid.UUID]:
+    """Mint a signed, server-issued guest identity (FR-A2). Integrity-protected so a client can't
+    fabricate guest ids to dodge the free-generation limit. Returns (token, guest_id)."""
+    guest_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    token = jwt.encode(
+        {
+            "sub": str(guest_id),
+            "typ": "guest",
+            "iat": now,
+            "exp": now + timedelta(minutes=settings.jwt_expire_minutes),
+        },
+        settings.jwt_secret,
+        algorithm=ALGORITHM,
+    )
+    return token, guest_id
+
+
+def decode_guest_token(token: str) -> uuid.UUID:
+    """Return the guest id from a valid guest token, or raise jwt.InvalidTokenError."""
+    payload = jwt.decode(token, settings.jwt_secret, algorithms=[ALGORITHM])
+    if payload.get("typ") != "guest":
+        raise jwt.InvalidTokenError("not a guest token")
     return uuid.UUID(payload["sub"])

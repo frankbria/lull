@@ -18,7 +18,13 @@ from sqlalchemy.orm import Session
 from .db import get_db
 from .models import User
 from .oauth import OAuthError, OAuthVerifier, get_oauth_verifier
-from .security import create_access_token, decode_access_token, hash_password, verify_password
+from .security import (
+    create_access_token,
+    create_guest_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _bearer = HTTPBearer(auto_error=False)
@@ -45,6 +51,10 @@ class OAuthIn(BaseModel):
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class GuestTokenOut(BaseModel):
+    guest_token: str
 
 
 class UserOut(BaseModel):
@@ -148,6 +158,16 @@ def oauth(
         db.commit()
         db.refresh(user)
     return TokenOut(access_token=create_access_token(user.id))
+
+
+@router.post("/guest", response_model=GuestTokenOut)
+def guest() -> GuestTokenOut:
+    """Issue a signed guest identity so an unauthenticated client can claim its one free
+    generation (FR-A2). Server-issued + integrity-protected — clients can't forge guest ids.
+    ponytail: rotation abuse (minting many guest tokens) is bounded by IP rate-limiting at the
+    edge, a deploy/infra concern — not solvable in the token itself."""
+    token, _ = create_guest_token()
+    return GuestTokenOut(guest_token=token)
 
 
 @router.get("/me", response_model=UserOut)

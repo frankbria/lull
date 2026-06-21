@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -42,10 +43,16 @@ def record_generation(db: Session, user_id: uuid.UUID) -> int:
     return db.execute(stmt).scalar_one()
 
 
-def consume_guest_generation(db: Session, guest_id: uuid.UUID) -> bool:
-    """Atomically claim one guest generation. Returns True if within the free allowance, else
-    False (caller should prompt account creation). Same upsert-RETURNING pattern as
-    record_generation, so concurrent guest requests can't over-grant."""
+def guest_within_limit(db: Session, guest_id: uuid.UUID) -> bool:
+    """Whether this guest still has a free generation left. Read-only — call BEFORE the billable
+    synth so a failed render doesn't burn the credit; record_guest_generation commits it after."""
+    used = db.scalar(select(GuestCredit.used).where(GuestCredit.guest_id == guest_id)) or 0
+    return used < GUEST_FREE_GENERATIONS
+
+
+def record_guest_generation(db: Session, guest_id: uuid.UUID) -> int:
+    """Increment the guest's counter after a successful generation; return the new total. Atomic
+    upsert (same pattern as record_generation) so concurrent requests can't lose a count."""
     stmt = (
         pg_insert(GuestCredit)
         .values(guest_id=guest_id, used=1)
@@ -55,5 +62,4 @@ def consume_guest_generation(db: Session, guest_id: uuid.UUID) -> bool:
         )
         .returning(GuestCredit.used)
     )
-    used = db.execute(stmt).scalar_one()
-    return used <= GUEST_FREE_GENERATIONS
+    return db.execute(stmt).scalar_one()

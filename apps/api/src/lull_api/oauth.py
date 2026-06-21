@@ -78,8 +78,10 @@ class OAuthVerifier:
                 audience=audiences,
                 issuer=list(provider_cfg.issuers),
             )
-        except jwt.InvalidTokenError as exc:
-            raise OAuthError(f"invalid id_token: {exc}") from exc
+        # PyJWKClientError (unknown kid / JWKS unreachable) is NOT an InvalidTokenError, so catch
+        # the PyJWTError base — otherwise a JWKS hiccup would surface as an unhandled 500.
+        except jwt.PyJWTError as exc:
+            raise OAuthError(f"could not verify id_token: {exc}") from exc
 
         email = claims.get("email")
         if not email:

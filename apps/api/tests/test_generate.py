@@ -29,15 +29,14 @@ def test_script_rejects_unknown_component():
 
 
 def test_tts_stub_returns_playable_wav(client):
-    """client fixture = transactional DB; a guest id claims the one free generation."""
-    import uuid
-
+    """client fixture = transactional DB; a server-issued guest token claims the free generation."""
     app.dependency_overrides[get_source] = lambda: StubAudioSource()
     try:
+        guest_token = client.post("/auth/guest").json()["guest_token"]
         r = client.post(
             "/tts",
             json={"text": "rest now, you are safe"},
-            headers={"X-Guest-Id": str(uuid.uuid4())},
+            headers={"X-Guest-Token": guest_token},
         )
         assert r.status_code == 200
         assert r.headers["content-type"] == "audio/wav"

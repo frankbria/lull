@@ -147,8 +147,8 @@ class GenerationCredit(Base):
 
 
 class GuestCredit(Base):
-    """Pre-account free generations (FR-A2). Keyed on a client-supplied device UUID (X-Guest-Id),
-    so a guest gets a fixed free allowance before being prompted to sign up."""
+    """Pre-account free generations (FR-A2). Keyed on a server-issued guest id (from the signed
+    X-Guest-Token), so a guest gets a fixed free allowance before being prompted to sign up."""
 
     __tablename__ = "guest_credits"
 
