@@ -37,13 +37,15 @@ Closes the remaining scope of #5 (data layer shipped in #31). Implements #32.
 7. **Quality gate** — ruff + black + full pytest (real Postgres); cross-family review;
    demo every AC with outcome evidence; CI; docs sync; PR → merge; close #5 + #32.
 
-## Acceptance criteria (from #32)
-- [ ] Email/password signup + login (argon2 → `User.password_hash`)
-- [ ] OAuth (Google + Apple) id_token verification
-- [ ] 18+ age gate enforced at account creation (sets `User.age_verified`)
-- [ ] JWT issuance + `current_user` FastAPI dependency
-- [ ] Guest mode: one free generation before account creation (FR-A2)
-- [ ] `record_generation()` / `has_access()` wired into the authed generation path
+## Acceptance criteria (from #32) — all demoed with outcome evidence in PR #35
+- [x] Email/password signup + login (argon2 → `User.password_hash`)
+- [x] OAuth (Google + Apple) id_token verification
+- [x] 18+ age gate enforced at account creation (sets `User.age_verified`)
+- [x] JWT issuance + `current_user` FastAPI dependency
+- [x] Guest mode: one free generation before account creation (FR-A2)
+- [x] `record_generation()` / `has_access()` wired into the authed generation path
+
+## Status: PR #35 open (closes #32, completes #5). Follow-up: #36 (guest-abuse control).
 
 ## Notes
 - Onboarding/consent flow (FR-O1..O4) is explicitly out of scope (Sprint-3 gate).
