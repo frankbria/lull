@@ -13,12 +13,19 @@ import { createAudioPlayer } from "expo-audio";
 // the new default export is the File/Directory API. Legacy is the minimal change here.
 import * as FileSystem from "expo-file-system/legacy";
 import { StatusBar } from "expo-status-bar";
+import Constants from "expo-constants";
 import { DEFAULT_SPEC, type ScriptResponse } from "@lull/shared";
 
 // Sprint-0 test harness: build a script, preview it, render to audio, and play it.
-// Device note: localhost won't reach your dev machine. Use the Android emulator host
-// (10.0.2.2), or your machine's LAN IP, via EXPO_PUBLIC_API_BASE.
-const API_BASE = process.env.EXPO_PUBLIC_API_BASE ?? "http://localhost:8000";
+// API base resolution (dev): the API runs on the SAME host as the Metro bundler this app
+// connected to — derive it from Expo's hostUri (e.g. "100.66.225.26:8081" -> :8000) so a real
+// device just works over LAN/Tailscale with no per-machine IP to set. Explicit
+// EXPO_PUBLIC_API_BASE wins (staging/prod); localhost is the last resort (web / simulator).
+function devApiBase(): string | undefined {
+  const host = Constants.expoConfig?.hostUri?.split(":")[0]; // strip the Metro port
+  return host ? `http://${host}:8000` : undefined;
+}
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE ?? devApiBase() ?? "http://localhost:8000";
 
 export default function App() {
   const [busy, setBusy] = useState(false);
