@@ -18,6 +18,11 @@ def test_default_secret_rejected_in_production():
         Settings(environment="production", jwt_secret=_DEFAULT_JWT_SECRET)
 
 
+def test_short_secret_rejected_in_production():
+    with pytest.raises(ValueError):
+        Settings(environment="production", jwt_secret="x")  # passes the default check, too short
+
+
 def test_real_secret_accepted_in_production():
     s = Settings(environment="production", jwt_secret="a-real-long-random-production-secret-value")
     assert s.environment == "production"

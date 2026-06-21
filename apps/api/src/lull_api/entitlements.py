@@ -45,19 +45,24 @@ def record_generation(db: Session, user_id: uuid.UUID) -> int:
 
 def reserve_guest_generation(db: Session, guest_id: uuid.UUID) -> bool:
     """Atomically claim a guest generation BEFORE the billable synth. Returns True if the claim is
-    within the free allowance, else False (caller rejects). The atomic upsert means two concurrent
-    first-requests can't both pass — one gets used=1 (True), the other used=2 (False). Pair with
-    release_guest_generation on synth failure so a failed render doesn't burn the credit."""
+    within the free allowance, else False (caller rejects).
+
+    The conflict update increments only WHERE used < limit, so an over-limit attempt is rejected
+    *without* bumping the counter (RETURNING yields no row → None). That keeps two properties:
+    concurrent first-requests can't both pass (row lock serializes them), and a rejected request
+    never inflates `used` — so a later release of a genuinely-reserved credit can't be cancelled
+    out by a rejected attempt. Pair with release_guest_generation on synth failure."""
     stmt = (
         pg_insert(GuestCredit)
         .values(guest_id=guest_id, used=1)
         .on_conflict_do_update(
             index_elements=[GuestCredit.guest_id],
             set_={"used": GuestCredit.used + 1},
+            where=GuestCredit.used < GUEST_FREE_GENERATIONS,
         )
         .returning(GuestCredit.used)
     )
-    return db.execute(stmt).scalar_one() <= GUEST_FREE_GENERATIONS
+    return db.execute(stmt).scalar_one_or_none() is not None
 
 
 def release_guest_generation(db: Session, guest_id: uuid.UUID) -> None:

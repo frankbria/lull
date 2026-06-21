@@ -4,6 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Public repo default — fine for local dev, MUST never sign tokens in a deployed environment.
 _DEFAULT_JWT_SECRET = "dev-insecure-change-me-with-a-real-32B+-secret"
 _DEV_ENVIRONMENTS = {"development", "dev", "local", "test"}
+# HS256 security rests entirely on this secret, so a deployed one needs real entropy.
+_MIN_JWT_SECRET_LEN = 32
 
 
 class Settings(BaseSettings):
@@ -46,13 +48,20 @@ class Settings(BaseSettings):
     apple_client_ids: list[str] = []
 
     @model_validator(mode="after")
-    def _require_real_jwt_secret_outside_dev(self) -> "Settings":
-        # Fail fast: a deployed env using the public default secret would let anyone forge tokens.
-        if self.environment not in _DEV_ENVIRONMENTS and self.jwt_secret == _DEFAULT_JWT_SECRET:
-            raise ValueError(
-                f"LULL_JWT_SECRET must be set in environment '{self.environment}' "
-                "(refusing to sign tokens with the public default)"
-            )
+    def _require_strong_jwt_secret_outside_dev(self) -> "Settings":
+        # Fail fast in deployed envs: the public default — or any short secret — would let an
+        # attacker forge user tokens (HS256 is only as strong as this key).
+        if self.environment not in _DEV_ENVIRONMENTS:
+            if self.jwt_secret == _DEFAULT_JWT_SECRET:
+                raise ValueError(
+                    f"LULL_JWT_SECRET must be set in environment '{self.environment}' "
+                    "(refusing to sign tokens with the public default)"
+                )
+            if len(self.jwt_secret) < _MIN_JWT_SECRET_LEN:
+                raise ValueError(
+                    f"LULL_JWT_SECRET must be at least {_MIN_JWT_SECRET_LEN} characters "
+                    f"in environment '{self.environment}'"
+                )
         return self
 
 

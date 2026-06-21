@@ -130,7 +130,7 @@ async def tts(
         except jwt.InvalidTokenError as exc:
             raise HTTPException(status_code=401, detail="invalid guest token") from exc
         if not reserve_guest_generation(db, guest_id):
-            db.commit()  # persist the (over-limit) attempt count
+            # Over-limit attempts don't bump the counter, so nothing to persist here.
             raise HTTPException(
                 status_code=401, detail="free generation used — create an account to continue"
             )
