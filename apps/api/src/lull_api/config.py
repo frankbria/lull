@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     # LULL_DATABASE_URL (Hostinger VPS Postgres).
     database_url: str = "postgresql+psycopg://lull:lull@localhost:5432/lull"
 
+    # Browser CORS allow-list. "*" is fine for local dev; set LULL_CORS_ORIGINS to the real
+    # web origin(s) in staging/prod (JSON list, e.g. ["https://app.example.com"]).
+    cors_origins: list[str] = ["*"]
+
     elevenlabs_api_key: str | None = None
     elevenlabs_voice_id: str = (
         "EXAVITQu4vr4xnSDxMaL"  # ElevenLabs "Sarah" default; swap per persona
