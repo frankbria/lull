@@ -1,6 +1,6 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
+from sqlalchemy import create_engine
 from sqlalchemy import pool
 
 from alembic import context
@@ -13,11 +13,14 @@ from lull_api import models  # noqa: F401  — register tables on Base.metadata
 # access to the values within the .ini file in use.
 config = context.config
 
-# Connection comes from app settings (LULL_DATABASE_URL) unless a caller set an explicit url
-# (e.g. tests pointing at lull_migtest). The ini ships a placeholder we always replace.
-_url = config.get_main_option("sqlalchemy.url")
-if not _url or _url.startswith("driver://"):
-    config.set_main_option("sqlalchemy.url", settings.database_url)
+# Resolve the DB URL into a plain string and feed it straight to the engine — NOT back through
+# Config/ConfigParser, whose `%` interpolation would choke on percent-encoded credentials in a
+# production DSN. A caller (tests) may set an explicit url; otherwise the ini ships a placeholder
+# we replace with app settings (LULL_DATABASE_URL).
+_override = config.get_main_option("sqlalchemy.url")
+DB_URL = (
+    settings.database_url if (not _override or _override.startswith("driver://")) else _override
+)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -44,9 +47,8 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=DB_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -63,11 +65,7 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = create_engine(DB_URL, poolclass=pool.NullPool, future=True)
 
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
