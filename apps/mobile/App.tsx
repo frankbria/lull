@@ -61,9 +61,16 @@ export default function App() {
       const script: ScriptResponse = await sres.json();
       setResult(script);
 
+      // Generation is gated: no auth UI in the Sprint-0 harness yet, so claim a guest token for
+      // the one free generation. ponytail: a fresh token per run keeps the dev harness usable;
+      // real sign-in + a persisted session land with the auth UI.
+      const gres = await fetch(`${API_BASE}/auth/guest`, { method: "POST" });
+      if (!gres.ok) throw new Error(`/auth/guest ${gres.status}`);
+      const { guest_token } = await gres.json();
+
       const tres = await fetch(`${API_BASE}/tts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Guest-Token": guest_token },
         body: JSON.stringify({ text: script.script }),
       });
       if (!tres.ok) throw new Error(`/tts ${tres.status}`);

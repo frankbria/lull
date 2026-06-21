@@ -8,10 +8,12 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from lull_api.db import Base
+from lull_api.db import Base, get_db
+from lull_api.main import app
 from lull_api import models  # noqa: F401  — register tables on Base.metadata
 
 TEST_DB_URL = "postgresql+psycopg://lull:lull@localhost:5432/lull_test"
@@ -43,3 +45,14 @@ def db(engine) -> Iterator[Session]:
         session.close()
         txn.rollback()
         conn.close()
+
+
+@pytest.fixture
+def client(db) -> Iterator[TestClient]:
+    """TestClient whose get_db yields the rolled-back test session, so endpoint writes (commits
+    included) hit the test DB inside the per-test transaction and never persist."""
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()

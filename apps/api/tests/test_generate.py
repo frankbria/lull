@@ -28,15 +28,21 @@ def test_script_rejects_unknown_component():
     assert r.status_code == 422
 
 
-def test_tts_stub_returns_playable_wav():
+def test_tts_stub_returns_playable_wav(client):
+    """client fixture = transactional DB; a server-issued guest token claims the free generation."""
     app.dependency_overrides[get_source] = lambda: StubAudioSource()
     try:
-        r = client.post("/tts", json={"text": "rest now, you are safe"})
+        guest_token = client.post("/auth/guest").json()["guest_token"]
+        r = client.post(
+            "/tts",
+            json={"text": "rest now, you are safe"},
+            headers={"X-Guest-Token": guest_token},
+        )
         assert r.status_code == 200
         assert r.headers["content-type"] == "audio/wav"
         assert r.content[:4] == b"RIFF"  # valid WAV header
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_source, None)
 
 
 def test_meditation_vs_hypnosis_opener_differs():

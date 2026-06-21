@@ -1,14 +1,29 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, HTTPException, Response
+import uuid
+
+import jwt
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from .audio import AudioSource, AudioSourceError, get_audio_source
+from .auth import current_user_optional, router as auth_router
 from .config import settings
+from .db import get_db
+from .entitlements import (
+    has_access,
+    record_generation,
+    release_guest_generation,
+    reserve_guest_generation,
+)
+from .models import User
 from .scripts import TrackSpec, build_script
+from .security import decode_guest_token
 
 app = FastAPI(title="Lull API", version="0.1.0")
+app.include_router(auth_router)
 
 # Browser clients (Expo web, and a future web build) are cross-origin to the API, so the
 # preflight needs CORS. Native (Expo Go / RN) ignores CORS. Default opens it for local dev;
@@ -80,16 +95,68 @@ def get_source() -> AudioSource:
 
 
 @app.post("/tts")
-async def tts(body: TtsIn, source: AudioSource = Depends(get_source)) -> Response:
-    """Render approved script text to audio via the configured AudioSource."""
+async def tts(
+    body: TtsIn,
+    source: AudioSource = Depends(get_source),
+    user: User | None = Depends(current_user_optional),
+    db: Session = Depends(get_db),
+    x_guest_token: str | None = Header(default=None),
+) -> Response:
+    """Render approved script text to audio via the configured AudioSource.
+
+    Generation is gated (FR-A2/FR-A5): authenticated users go through has_access + the credit
+    counter (free, non-blocking at launch); guests present a server-issued X-Guest-Token (from
+    POST /auth/guest) good for GUEST_FREE_GENERATIONS, then must create an account. The guest
+    allowance is reserved atomically BEFORE the billable synth (so concurrent requests can't both
+    slip through) and released if the render fails (so a failure never burns the free generation).
+    """
     # Hard char cap enforced BEFORE any (billable) outbound call.
     if len(body.text) > settings.max_script_chars:
         raise HTTPException(status_code=422, detail="text exceeds max_script_chars")
+
+    guest_id: uuid.UUID | None = None
+    if user is not None:
+        if not has_access(db, user.id, "generation"):
+            raise HTTPException(status_code=403, detail="generation not available on your plan")
+    else:
+        if not x_guest_token:
+            raise HTTPException(
+                status_code=401,
+                detail="sign in, or call POST /auth/guest for a free generation",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        try:
+            guest_id = decode_guest_token(x_guest_token)
+        except jwt.InvalidTokenError as exc:
+            raise HTTPException(status_code=401, detail="invalid guest token") from exc
+        if not reserve_guest_generation(db, guest_id):
+            # Over-limit attempts don't bump the counter, so nothing to persist here.
+            raise HTTPException(
+                status_code=401, detail="free generation used — create an account to continue"
+            )
+        db.commit()  # commit the reservation before the (slow, billable) synth
+
     try:
-        audio = await source.synthesize(body.text)
+        audio = await _synthesize(source, body.text)
+    except HTTPException:
+        if guest_id is not None:
+            release_guest_generation(db, guest_id)  # render failed → don't burn the free credit
+            db.commit()
+        raise
+
+    # Authed credit counts successful generations only (free/non-blocking at launch).
+    if user is not None:
+        record_generation(db, user.id)
+        db.commit()
+
+    return Response(content=audio, media_type=source.media_type)
+
+
+async def _synthesize(source: AudioSource, text: str) -> bytes:
+    try:
+        return await source.synthesize(text)
     except AudioSourceError as exc:
         raise HTTPException(
             status_code=exc.status_code,
             detail={"message": exc.message, "retryable": exc.retryable},
         ) from exc
-    return Response(content=audio, media_type=source.media_type)

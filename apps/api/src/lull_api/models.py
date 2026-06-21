@@ -144,3 +144,14 @@ class GenerationCredit(Base):
         ForeignKey("users.id", ondelete="CASCADE"), unique=True
     )
     used: Mapped[int] = mapped_column(Integer, default=0)  # generations consumed (counter)
+
+
+class GuestCredit(Base):
+    """Pre-account free generations (FR-A2). Keyed on a server-issued guest id (from the signed
+    X-Guest-Token), so a guest gets a fixed free allowance before being prompted to sign up."""
+
+    __tablename__ = "guest_credits"
+
+    id: Mapped[uuid.UUID] = _pk()
+    guest_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True, index=True)
+    used: Mapped[int] = mapped_column(Integer, default=0)
