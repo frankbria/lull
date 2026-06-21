@@ -7,10 +7,17 @@ High-level shape for the MVP. Detail and rationale in [`PRD.md`](PRD.md) §9.
   MediaSession** for long background playback (built in Sprint 2, not retrofitted). Local audio
   cache + on-disk playback-position store.
 - **Backend:** FastAPI (Python, `uv`), **PostgreSQL** (SQLAlchemy 2.0 + Alembic migrations).
-  **Auth is Python-native** — Authlib (OAuth), passlib/argon2 (password hashing), JWT/session
-  tokens — kept in-process so the backend stays one language and one deploy unit. *(BetterAuth was
-  the original pick but is Node/TS-only; running it would mean a second runtime + cross-service
-  session verification, not worth it for a solo MVP on a shared VPS.)*
+  **Auth is Python-native** — passlib/argon2 (password hashing) + **PyJWT** for both verifying
+  provider `id_token`s (Google/Apple, RS256/JWKS) and issuing our own HS256 session tokens — kept
+  in-process so the backend stays one language and one deploy unit. *(BetterAuth was the original
+  pick but is Node/TS-only. PyJWT replaced the originally-planned Authlib: native mobile sign-in
+  sends an `id_token` the backend only needs to verify, so Authlib's redirect/auth-code flow would
+  go unused.)*
+  - **Endpoints:** `POST /auth/signup` · `POST /auth/login` · `POST /auth/oauth/{provider}` ·
+    `POST /auth/guest` · `GET /auth/me`. `current_user` is a FastAPI dependency over a bearer JWT.
+  - **18+ age gate** enforced at account creation (sets `User.age_verified`).
+  - **Guest mode (FR-A2):** `POST /auth/guest` issues a signed guest token good for one free
+    `/tts`; generation is gated via the entitlement seam (`has_access` / `record_generation`).
 - **Monorepo:** `apps/mobile` (Expo) · `apps/api` (FastAPI) · `packages/shared` (TS types shared
   across client/contract).
 
