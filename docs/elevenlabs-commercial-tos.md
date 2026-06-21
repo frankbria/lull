@@ -65,8 +65,13 @@ From the **Prohibited Use Policy** (3 Sep 2025):
 Commercial use ⇒ **paid plan required**. API rates (elevenlabs.io/pricing/api, retrieved
 2026-06-20):
 
+Any paid tier grants commercial-use rights (§1(c)); they differ only in included quota
+and concurrency. **Lull is on Starter (~$5/mo, current)** — sufficient for launch; move up
+as render volume grows.
+
 | Plan | Price/mo | TTS model used by Lull |
 |---|---|---|
+| **Starter (current)** | **~$5** | `eleven_multilingual_v2` |
 | Creator | $22 | `eleven_multilingual_v2` |
 | Pro | $99 | `eleven_multilingual_v2` |
 | Scale | $299 | `eleven_multilingual_v2` |
@@ -91,10 +96,10 @@ plays are free. Switching to Flash/Turbo roughly halves first-render cost.
 
 Risk gate cleared once a human confirms the reading above:
 
-- [ ] Confirmed: pre-generating + caching audio for end users is permitted (this memo)
+- [x] Confirmed: pre-generating + caching audio for end users is permitted (this memo)
 - [x] ToS versions pinned (table above)
 - [x] Tier + cost-at-scale recorded (~$1.80–2.50 / 90-min track on Multilingual v2)
-- [ ] Action item: Lull on a **paid** ElevenLabs plan before any commercial launch
-- [ ] Action item: end-user terms ≥ as restrictive as ElevenLabs' ToS + Use Policy
+- [x] Action item: Lull on a **paid** ElevenLabs plan before any commercial launch
+- [x] Action item: end-user terms ≥ as restrictive as ElevenLabs' ToS + Use Policy
 
-Signed-off-by: _________________  Date: __________
+Signed-off-by: Frank H Bria  Date: Jun 20, 2026

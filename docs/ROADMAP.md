@@ -21,7 +21,7 @@ domain / pricing / social is a separate workstream after a usable MVP (Sprint 6+
 1. **App/Play store policy** — store-safe language; KAP UI not built until policy stance confirmed; keep sideload/PWA fallback.
 2. **Attorney-reviewed consent + privacy policy** — health-adjacent + psychedelic context.
 3. **Panic-path reliability** — native dialer, local contact, works airplane/DND/locked-screen; verified on real devices.
-4. **ElevenLabs cost + ToS** — char cap, preview-before-render, hash-and-cache, confirm caching permitted + pin ToS version. → [`elevenlabs-commercial-tos.md`](elevenlabs-commercial-tos.md) (caching permitted on a paid plan; awaiting human sign-off).
+4. **ElevenLabs cost + ToS** — char cap, preview-before-render, hash-and-cache, confirm caching permitted + pin ToS version. → [`elevenlabs-commercial-tos.md`](elevenlabs-commercial-tos.md) ✅ **cleared** (caching permitted on a paid plan; signed off, on Starter plan).
 5. **AI script content safety** — moderation pass + legal review of sample scripts.
 6. **Android foreground-service kills** (Samsung OneUI) — correct impl + battery-exemption guidance.
 
