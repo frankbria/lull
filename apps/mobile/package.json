@@ -9,6 +9,7 @@
     "ios": "expo start --ios"
   },
   "dependencies": {
+    "@babel/runtime": "^7.25.0",
     "@expo/metro-runtime": "~4.0.1",
     "@lull/shared": "workspace:*",
     "expo": "~52.0.0",
