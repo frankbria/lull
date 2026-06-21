@@ -1,20 +1,25 @@
-# Issue #2 — P[0.1.2] Wire and verify real ElevenLabs TTS round-trip
+# Issue #4 — P[0.1.4] Confirm App Store / Play policy stance for positioning
 
-**Plan source:** self-authored. **Branch:** `feat/2-elevenlabs-roundtrip`
+**Type:** risk-gate (decision/docs). Blocks building KAP UI. Mirrors the ElevenLabs ToS gate (#3 → `docs/elevenlabs-commercial-tos.md`).
 
-## Adapted plan
-1. Harden `apps/api/src/lull_api/audio.py` `ElevenLabsAudioSource`:
-   - Add an optional `transport` seam so the external boundary is testable without a live key.
-   - Map failures to a typed `AudioSourceError(message, status_code, retryable)`:
-     timeout → retryable; 401 → not retryable ("check API key"); 429 → retryable; 5xx → retryable.
-2. `apps/api/src/lull_api/main.py` `/tts`: catch `AudioSourceError` → clear HTTP status
-   (502/503/504) + `{detail, retryable}`; missing-key `RuntimeError` → 503. Keep char cap before the call.
-3. TDD: `tests/test_elevenlabs.py` via `httpx.MockTransport` — success returns bytes + correct request
-   shape (xi-api-key header, voice id in URL, text in body); 401/429/5xx/timeout → mapped status +
-   retryable flag; char cap rejected before any outbound call.
+## Acceptance criteria → deliverable mapping
+- [ ] Written go/no-go on wellness framing → memo "Short answer" + sign-off
+- [ ] No KAP/psychedelic language in store metadata plan → banned-terms + approved-framing table
+- [ ] Sideload/PWA fallback decision recorded → fallback section
 
-## Acceptance criteria
-- [ ] `LULL_AUDIO_SOURCE=elevenlabs` + key renders a real script to audio — **needs key (Phase 4)**
-- [ ] Audio plays end-to-end on device — **device-only (→ #24-style follow-up)**
-- [ ] Hard char cap + cost/time estimate enforced before the charge — **verifiable here**
-- [ ] API errors/timeouts return a clear, retryable error — **verifiable here**
+## Plan (docs-only)
+1. **New doc** `docs/app-store-policy-stance.md` — go/no-go memo, ElevenLabs-doc format:
+   - Gate question + short answer (**GO** on wellness framing, with conditions)
+   - Pinned policy versions (Apple App Store Review Guidelines; Google Play Marijuana / Illegal Activities; retrieved 2026-06-20)
+   - Analysis: Lull neither sells nor facilitates sale of controlled substances and gives no dosing → Apple **1.4.3** & Google **Marijuana** policy don't bite; not a medical app but honor Apple **1.4.1/1.4.2** disclaimer posture
+   - Store-metadata language rule: banned terms vs approved framing ("extended session planning", "your own contacts")
+   - **Sideload/PWA fallback decision**: Android APK sideload + installable PWA as plan-B if Play rejects; iOS fallback = PWA / EU alt-marketplace
+   - Sign-off checklist mapping the 3 ACs + human countersign line
+2. **Update** `docs/ROADMAP.md` risk gate #1 → link new doc, mark cleared (mirror gate #4 row).
+3. **Update** `docs/PRD.md` §10 risk 1 → link new doc.
+
+## Out of scope
+No code. No store-listing copy yet (Sprint 6). Not legal advice — human countersign required.
+
+## Process
+branch `docs/p0-1-4-store-policy-stance` → write → pre-commit → PR → demo (AC checklist) → merge.
