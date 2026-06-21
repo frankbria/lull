@@ -1,3 +1,8 @@
+# Expo/Metro (SDK 53+) resolve packages assuming a flat node_modules; pnpm's isolated layout
+# hides transitive deps (e.g. metro-runtime) from @expo/cli. Hoisted linker is Expo's documented
+# fix for pnpm monorepos. https://docs.expo.dev/guides/monorepos/
+nodeLinker: hoisted
+
 packages:
   - "apps/mobile"
   - "packages/*"

@@ -6,5 +6,8 @@
     "api:dev": "cd apps/api && uv run uvicorn lull_api.main:app --reload",
     "api:test": "cd apps/api && uv run pytest -q",
     "mobile": "pnpm --filter mobile start"
+  },
+  "engines": {
+    "node": ">=20.19.4"
   }
 }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .audio import AudioSource, AudioSourceError, get_audio_source
@@ -8,6 +9,16 @@ from .config import settings
 from .scripts import TrackSpec, build_script
 
 app = FastAPI(title="Lull API", version="0.1.0")
+
+# Browser clients (Expo web, and a future web build) are cross-origin to the API, so the
+# preflight needs CORS. Native (Expo Go / RN) ignores CORS. Default opens it for local dev;
+# staging/prod restrict via LULL_CORS_ORIGINS.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class TrackSpecIn(BaseModel):

@@ -41,17 +41,20 @@ uv run uvicorn lull_api.main:app --reload          # http://localhost:8000  (/he
 Real ElevenLabs round-trip: copy `apps/api/.env.example` → `.env`, set `LULL_AUDIO_SOURCE=elevenlabs`
 and `LULL_ELEVENLABS_API_KEY`.
 
-**Mobile** (deps already reconciled via the workspace install):
+**Mobile** (Expo SDK 54; deps reconciled via the workspace install):
 ```bash
 pnpm install                           # from repo root — installs the workspace
 cd apps/mobile
-cp .env.example .env                    # set EXPO_PUBLIC_API_BASE for your target (see below)
 pnpm exec expo start                    # --android / --ios / --web
 ```
-`EXPO_PUBLIC_API_BASE` — where the app reaches the API:
-- Android emulator → `http://10.0.2.2:8000`
-- Physical device (same Wi-Fi) → `http://<LAN-IP>:8000`
-- Web / iOS simulator → `http://localhost:8000`
+The app **auto-derives the API base** from the Metro host it connects to (same host, port
+8000) — no per-target config for the common case. Overrides:
+- **Physical device over LAN/Tailscale:** start Metro advertising a phone-reachable host so the
+  derived API base matches —
+  `REACT_NATIVE_PACKAGER_HOSTNAME=<reachable-ip> pnpm exec expo start`
+  (Expo Go must match the project's SDK; the API must bind `--host 0.0.0.0`).
+- **Anything non-default** (staging, a separate API box): set `EXPO_PUBLIC_API_BASE` explicitly
+  (e.g. `http://10.0.2.2:8000` for the Android emulator) — it always wins over derivation.
 
 ## Docs
 - [`docs/PRD.md`](docs/PRD.md) — product requirements
