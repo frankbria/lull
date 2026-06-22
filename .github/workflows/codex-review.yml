@@ -1,0 +1,93 @@
+name: Codex review
+
+# Cross-family, automated PR review that is independent of CodeRabbit (#37). Advisory:
+# it posts findings as a PR comment but is NOT a required check, so a transient OpenAI
+# outage — or CodeRabbit being down — never blocks merge. Skips gracefully (no-op) when
+# OPENAI_API_KEY is absent (forks, or before the secret is set).
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# One review per PR; cancel superseded runs (cheaper, and re-runs update the same comment).
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  codex-review:
+    name: codex review (advisory)
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      # Secrets aren't available to fork PRs and the key may not be set yet — skip cleanly
+      # rather than fail, so the pipeline stays green and unblocked.
+      - name: Check for OpenAI key
+        id: guard
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: echo "has_key=${OPENAI_API_KEY:+true}" >> "$GITHUB_OUTPUT"
+
+      - name: Note skipped review
+        if: steps.guard.outputs.has_key != 'true'
+        run: echo "::notice::OPENAI_API_KEY not set — skipping Codex review (advisory step)."
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
+        if: steps.guard.outputs.has_key == 'true'
+        with:
+          fetch-depth: 0            # need the base commit to diff against
+          persist-credentials: false  # read-only review — no authenticated git ops needed
+
+      - name: Run Codex review
+        id: codex
+        if: steps.guard.outputs.has_key == 'true'
+        continue-on-error: true   # advisory: a transient OpenAI outage must not block the PR
+        uses: openai/codex-action@e0fdf01220eb9a88167c4898839d273e3f2609d1   # v1.8
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: read-only
+          output-file: codex-review.md
+          prompt: |
+            You are an automated code reviewer for this pull request. Inspect the changes by
+            running: git diff ${{ github.event.pull_request.base.sha }}...HEAD
+
+            Focus on real defects in the diff: correctness bugs, security issues, data-loss
+            risks, and broken error handling. Do not restate unchanged code or nitpick style
+            that linters already cover.
+
+            Respond in GitHub-flavored Markdown with exactly these sections:
+            - A one-line **Verdict**.
+            - `## Critical / Major` — high-severity findings, each as `path:line — problem, then
+              the fix`. Write `None.` if there are none.
+            - `## Minor / Nits` — lower-severity items, or `None.`
+
+            Be concise. If the diff is clean, say so plainly.
+
+      - name: Post review comment
+        if: steps.guard.outputs.has_key == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          MARKER="<!-- codex-review -->"
+          if [ -s codex-review.md ]; then
+            BODY="$MARKER"$'\n'"## 🤖 Codex review (advisory)"$'\n\n'"$(cat codex-review.md)"
+          else
+            BODY="$MARKER"$'\n'"## 🤖 Codex review (advisory)"$'\n\n'"Codex did not return output (transient error). This step is advisory and does not block merge."
+          fi
+          # Idempotent sticky comment: update the existing one if present, else create.
+          # --paginate walks every page (default page size misses the marker on busy PRs);
+          # the jq filter runs per page, so only the page holding the marker emits an id.
+          id="$(gh api -X GET --paginate -f per_page=100 "repos/$REPO/issues/$PR/comments" --jq \
+            "map(select(.body | startswith(\"$MARKER\"))) | first | .id // empty")"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -f body="$BODY" >/dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$BODY" >/dev/null
+          fi

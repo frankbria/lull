@@ -56,6 +56,13 @@ The app **auto-derives the API base** from the Metro host it connects to (same h
 - **Anything non-default** (staging, a separate API box): set `EXPO_PUBLIC_API_BASE` explicitly
   (e.g. `http://10.0.2.2:8000` for the Android emulator) — it always wins over derivation.
 
+## CI
+GitHub Actions runs on every PR (`.github/workflows/`):
+- **`ci.yml`** — api (`ruff` + `pytest` against a Postgres service) and mobile (`tsc` + `eslint`).
+- **`codex-review.yml`** — an automated, advisory cross-family code review via OpenAI Codex,
+  independent of CodeRabbit. Posts findings as a sticky PR comment; never blocks merge. Requires
+  an `OPENAI_API_KEY` repo secret (`gh secret set OPENAI_API_KEY`); skips cleanly when unset or on forks.
+
 ## Docs
 - [`docs/PRD.md`](docs/PRD.md) — product requirements
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — sprints + risk gates
