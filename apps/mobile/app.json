@@ -13,7 +13,26 @@
       "bundleIdentifier": "com.lull.app"
     },
     "plugins": [
-      "expo-audio"
-    ]
+      [
+        "expo-audio",
+        {
+          "recordAudioAndroid": false,
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "36c5e1e0-ad04-42c2-bb48-392efe2182d1"
+      }
+    },
+    "owner": "frankbria",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/36c5e1e0-ad04-42c2-bb48-392efe2182d1",
+      "checkAutomatically": "ON_LOAD"
+    }
   }
 }

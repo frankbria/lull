@@ -63,6 +63,34 @@ GitHub Actions runs on every PR (`.github/workflows/`):
   independent of CodeRabbit. Posts findings as a sticky PR comment; never blocks merge. Requires
   an `OPENAI_API_KEY` repo secret (`gh secret set OPENAI_API_KEY`); skips cleanly when unset or on forks.
 
+## Device delivery (EAS Build + OTA)
+Internal dev-test loop: install once, then every merge to `main` pushes an over-the-air JS/asset
+update that the app pulls **automatically on next cold start** (`expo-updates` `checkAutomatically:
+ON_LOAD`). This is *not* store distribution (Sprint 6).
+
+**One-time setup**
+1. `EXPO_TOKEN` repo secret (create at expo.dev → Access Tokens): `gh secret set EXPO_TOKEN`.
+   The OTA workflow no-ops until this is set.
+2. Build + install the internal APK on the Android device (Expo's infra builds it):
+   ```bash
+   cd apps/mobile
+   eas build --profile preview --platform android   # subscribes the build to the `preview` channel
+   ```
+   Install the resulting APK on the device (open the build link, or `eas build:run`).
+
+**How updates flow**
+- Merge to `main` → `.github/workflows/eas-update.yml` runs `eas update --branch preview` →
+  the installed build pulls the new bundle on its next cold start.
+- **Foreground-resume caveat:** `ON_LOAD` checks on app **launch/cold start**, not on resume from
+  background. A long-backgrounded app applies the update the next time it's fully relaunched.
+
+**Native-change caveat (important)**
+OTA only ships JS/assets over the *existing* native runtime. Adding a native module/permission or
+otherwise changing native code bumps the `runtimeVersion` (policy: `appVersion`) — those builds
+**won't** receive OTA updates targeted at the old runtime. When native deps/config change, bump
+`version` in `app.json` and do a fresh `eas build` + install. The workflow's `paths` filter skips
+OTA on native/config-only churn so it never ships an incompatible bundle.
+
 ## Docs
 - [`docs/PRD.md`](docs/PRD.md) — product requirements
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — sprints + risk gates
