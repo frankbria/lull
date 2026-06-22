@@ -36,10 +36,11 @@ jobs:
         if: steps.guard.outputs.has_key != 'true'
         run: echo "::notice::OPENAI_API_KEY not set — skipping Codex review (advisory step)."
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2
         if: steps.guard.outputs.has_key == 'true'
         with:
-          fetch-depth: 0   # need the base commit to diff against
+          fetch-depth: 0            # need the base commit to diff against
+          persist-credentials: false  # read-only review — no authenticated git ops needed
 
       - name: Run Codex review
         id: codex
