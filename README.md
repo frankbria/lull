@@ -90,11 +90,12 @@ ON_LOAD`). This is *not* store distribution (Sprint 6).
   background. A long-backgrounded app applies the update the next time it's fully relaunched.
 
 **Native-change caveat (important)**
-OTA only ships JS/assets over the *existing* native runtime. Adding a native module/permission or
-otherwise changing native code bumps the `runtimeVersion` (policy: `appVersion`) — those builds
-**won't** receive OTA updates targeted at the old runtime. When native deps/config change, bump
-`version` in `app.json` and do a fresh `eas build` + install. The workflow's `paths` filter skips
-OTA on native/config-only churn so it never ships an incompatible bundle.
+OTA only ships JS/assets over the *existing* native runtime. `runtimeVersion` uses the
+**`fingerprint`** policy: adding a native module/permission (or other native change) automatically
+changes the computed runtimeVersion, so the OTA targets a *new* runtime that your already-installed
+build doesn't subscribe to — it simply won't pull an incompatible bundle (no crash, no manual
+`version` bump needed). To pick up a native change on the device you must do a fresh
+`eas build --profile preview` + install; pure JS/asset changes flow over OTA automatically.
 
 ## Docs
 - [`docs/PRD.md`](docs/PRD.md) — product requirements

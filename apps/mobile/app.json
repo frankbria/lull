@@ -28,7 +28,7 @@
     },
     "owner": "frankbria",
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "fingerprint"
     },
     "updates": {
       "url": "https://u.expo.dev/36c5e1e0-ad04-42c2-bb48-392efe2182d1",

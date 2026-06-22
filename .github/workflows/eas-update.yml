@@ -8,14 +8,11 @@ name: EAS OTA update
 on:
   push:
     branches: [main]
-    # Skip native/CI-only churn: a runtimeVersion (native) change needs a rebuild, not an OTA push.
+    # Only run for changes that affect the app bundle (skip api-only / docs merges).
     paths:
       - "apps/mobile/**"
       - "packages/**"
       - "pnpm-lock.yaml"
-      - "!apps/mobile/eas.json"
-      - "!apps/mobile/android/**"
-      - "!apps/mobile/ios/**"
 
 # One publish per ref; a newer push supersedes an in-flight update.
 concurrency:
