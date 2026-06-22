@@ -79,14 +79,21 @@ ON_LOAD`). This is *not* store distribution (Sprint 6).
    Install the resulting APK on the device (open the build link, or `eas build:run`).
 3. **API base for the standalone build.** A built APK has no Metro host to derive the API URL from,
    so it falls back to `localhost:8000` (the phone itself). Set the repo **variable**
-   `EXPO_PUBLIC_API_BASE` to a device-reachable API URL (e.g. the dev box's Tailscale URL,
-   `http://100.x.y.z:8000`): `gh variable set EXPO_PUBLIC_API_BASE`. The OTA workflow embeds it
-   into each published bundle.
+   `EXPO_PUBLIC_API_BASE` to a device-reachable API URL (`gh variable set EXPO_PUBLIC_API_BASE`); the
+   OTA workflow embeds it into each published bundle. **Use HTTPS:** a release-mode APK blocks
+   cleartext (plain `http://`) traffic on modern Android, so a plain-HTTP dev API (e.g. an
+   `http://100.x.y.z:8000` Tailscale box) won't be reachable from the build. Front the dev API with
+   TLS, or — for dev only, never production — enable cleartext via the `expo-build-properties`
+   plugin (`android.usesCleartextTraffic: true`). API connectivity for on-device builds is tracked
+   with the device-proving work (#24), separate from these delivery rails.
 
 **How updates flow**
-- Merge to `main` → `.github/workflows/eas-update.yml` runs `eas update --branch preview` →
-  the installed build pulls the new bundle on its next cold start.
-- **Foreground-resume caveat:** `ON_LOAD` checks on app **launch/cold start**, not on resume from
+- Merge to `main` → `.github/workflows/eas-update.yml` runs `eas update --channel preview` → the
+  installed build **downloads** the new bundle on its next launch and **applies it on the following
+  cold start** (`checkAutomatically: ON_LOAD` + `fallbackToCacheTimeout: 0` — the app starts
+  instantly from cache and swaps in the update on the next relaunch, rather than blocking startup on
+  the network).
+- **Foreground-resume caveat:** the check happens on app **launch/cold start**, not on resume from
   background. A long-backgrounded app applies the update the next time it's fully relaunched.
 
 **Native-change caveat (important)**
