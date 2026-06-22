@@ -44,6 +44,29 @@ real gate, not a formality. What it surfaced and the patterns to keep:
   exact public default lets `LULL_JWT_SECRET=x` through. Add a min-length check, gated on a
   non-dev `environment`, in a pydantic `model_validator`.
 
+## EAS Build + OTA (from #33)
+- **SDK < 56 monorepos need an explicit `apps/mobile/metro.config.js`.** Without it the EAS cloud
+  bundle anchors to the pnpm **workspace root** (no `main` field) and falls back to
+  `expo/AppEntry.js` → `import '../../App'` → "Unable to resolve module ../../App". It builds fine
+  *locally* (your hoisted `node_modules` masks it), so this only surfaces in the cloud. Fix:
+  `getDefaultConfig(__dirname)` + `watchFolders=[workspaceRoot]` + `nodeModulesPaths=[app, workspace]`.
+  Auto-config landed in SDK 56; until then the file is mandatory. (`nodeLinker: hoisted` is necessary
+  but not sufficient.)
+- **Pull EAS cloud logs without the browser:** the build page renders logs client-side, but the
+  Expo GraphQL API (`https://api.expo.dev/graphql`, header `expo-session: <state.json sessionSecret>`)
+  exposes `builds.byId(...).{error, logFiles}`. The `logFiles` URLs are **brotli**-compressed — decode
+  with python `brotli.decompress`. Reproduce the failing phase locally with the same command the log
+  shows (`expo export:embed --eager --platform android --dev false`), run from the repo root to mimic
+  the cloud's workspace-root anchoring.
+- **Running `eas`/`expo` from the repo root litters root-level `app.json`/`eas.json` defaults** (with
+  a *different* auto-package like `com.frankbria.lull`). Run them from `apps/mobile`; if stray root
+  configs appear, delete them before committing.
+- **`runtimeVersion: fingerprint` + `eas update --channel` (not `--branch`)** is the safe OTA combo:
+  native changes auto-bump the runtime so installed builds never pull an incompatible JS bundle.
+- **Release Android blocks cleartext HTTP** — a standalone APK can't reach a plain-`http://` dev API
+  (Tailscale box). Needs HTTPS (e.g. `tailscale serve`) or dev-only `expo-build-properties`
+  `usesCleartextTraffic` (never production).
+
 ## Process
 - When an issue is pure device/human verification, do every headless proxy first (typecheck,
   bundle, API contract, real request logs), then hand a precise runbook for the human-only part.
