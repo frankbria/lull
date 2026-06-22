@@ -4,7 +4,7 @@
 - [ ] `eas.json` + EAS project configured; `expo-updates` added with `runtimeVersion` policy + `updates.url`/channel.
 - [ ] One-time dev/preview build installs on the Android device (`eas build --profile preview --platform android`). [HUMAN]
 - [ ] App auto-updates on launch — `expo-updates` `checkAutomatically: ON_LOAD`; document foreground-resume behavior.
-- [ ] GitHub Actions job: on merge to `main`, `eas update --branch <channel>` (JS/asset only; native needs rebuild).
+- [ ] GitHub Actions job: on merge to `main`, `eas update --channel preview` (JS/asset only; native needs rebuild).
 - [ ] Channel mapping: `main` → `preview` channel the installed build subscribes to.
 - [ ] Idempotent + cached (reuse #6 setup); `EXPO_TOKEN` via secrets, never committed.
 - [ ] README "Device delivery" section: one-time install, update flow, native-change caveat.
