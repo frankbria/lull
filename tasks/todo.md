@@ -1,32 +1,33 @@
-# P[0.1.6a] CI: automated cross-family PR review independent of CodeRabbit — Issue #37
+# P[0.1.7] EAS Build + OTA continuous delivery to test device — Issue #33
 
 ## Acceptance criteria
-- [ ] On every PR, CI runs an automated review independent of CodeRabbit; surfaces findings (PR comment).
-- [ ] Findings visible on the PR; Critical/Major easy to triage before merge.
-- [ ] Resilient to a single reviewer being down (CodeRabbit down -> CI reviewer still posts).
-- [ ] Reviewer secrets stored as GitHub Actions secrets, not in the repo.
-- [ ] Idempotent; doesn't block on transient outages. Policy = **advisory**.
+- [ ] `eas.json` + EAS project configured; `expo-updates` added with `runtimeVersion` policy + `updates.url`/channel.
+- [ ] One-time dev/preview build installs on the Android device (`eas build --profile preview --platform android`). [HUMAN]
+- [ ] App auto-updates on launch — `expo-updates` `checkAutomatically: ON_LOAD`; document foreground-resume behavior.
+- [ ] GitHub Actions job: on merge to `main`, `eas update --channel preview` (JS/asset only; native needs rebuild).
+- [ ] Channel mapping: `main` → `preview` channel the installed build subscribes to.
+- [ ] Idempotent + cached (reuse #6 setup); `EXPO_TOKEN` via secrets, never committed.
+- [ ] README "Device delivery" section: one-time install, update flow, native-change caveat.
 
 ## Decisions (approved)
-- Reviewer: **OpenAI Codex** via `openai/codex-action` (SHA-pinned v1.8 `e0fdf01…`). Non-Claude, non-CodeRabbit.
-- Policy: **advisory** — posts a PR comment; NOT a required check; transient outage doesn't block.
-- Secret `OPENAI_API_KEY` added by owner **after merge**; workflow no-ops gracefully until then.
+- **Repo: PUBLIC** (done — `gh repo edit --visibility public`).
+- Device-proven (#24): **yes** — OK to wire OTA.
+- EAS project setup done **live this session** via owner's Expo login (`eas init` + `eas update:configure`).
 
 ## Plan
-1. New `.github/workflows/codex-review.yml` (separate from ci.yml — independent + easy to disable):
-   - `on: pull_request` [opened, reopened, synchronize, ready_for_review]; skip drafts (cost).
-   - `permissions: contents: read, pull-requests: write`; per-PR `concurrency` cancel-in-progress.
-   - **guard step**: read `OPENAI_API_KEY` into env; emit `has_key`. Empty (fork / unset) -> skip the
-     review + post steps. (This IS the resilience/skip path.)
-   - checkout `fetch-depth: 0` (needs base SHA for the diff).
-   - `openai/codex-action@<sha>`: `openai-api-key`, review `prompt` (diff vs base.sha; markdown grouped
-     Critical/Major first), `sandbox: read-only`, `output-file`. `continue-on-error: true` (advisory).
-   - **sticky comment**: marker `<!-- codex-review -->`, find-and-update-or-create via `gh api`
-     (idempotent — re-run updates in place, no comment spam).
-2. `ci.yml` unchanged; review job is NOT added to required checks (advisory).
-3. README: note the CI review step + that it needs `OPENAI_API_KEY`.
+1. **Auth** (owner): `npx eas-cli login` (file-based, persists to session).
+2. `expo install expo-updates` (SDK-54-aligned version) in apps/mobile.
+3. `eas init` → writes `extra.eas.projectId`. `eas update:configure` → `updates.url`, `runtimeVersion` policy, `expo-updates` plugin.
+4. `app.json`: `updates.checkAutomatically = "ON_LOAD"`, confirm `runtimeVersion` policy (appVersion or fingerprint).
+5. `eas.json`: build profiles `development` / `preview` / `production`, each mapped to a channel; `preview` = internal APK, channel `preview`.
+6. `.github/workflows/eas-update.yml`: `on: push: branches:[main]` (+ `paths` JS/asset), checkout (SHA-pinned) → setup-node+pnpm (reuse #6 cache) → `eas update --branch preview --non-interactive --auto`. Guard on `EXPO_TOKEN` (graceful skip like codex-review). `EXPO_TOKEN` via secret.
+7. README "Device delivery" section.
+8. `gh secret set EXPO_TOKEN` (owner-provided token).
+
+## Demo evidence mapping
+- Config ACs: `expo-doctor` / typecheck pass; eas.json + app.json show channel + ON_LOAD.
+- Build + device-install + auto-update-on-launch: **HUMAN acceptance step** (owner's Expo account + phone) — document outcome.
+- Workflow AC: dry-run / graceful-skip path verified in CI; `eas update` job structure shown.
 
 ## Out of scope (YAGNI)
-- Inline per-line comments + JSON-schema parsing (cookbook's heavier path) — sticky markdown summary
-  is enough for advisory triage; revisit if we make it blocking.
-- Label/size cost-gating — cancel-superseded + draft-skip cover it for now.
+- Store/TestFlight/Play CD (Sprint 6), iOS device delivery (Sprint 7), native-change auto-rebuild pipeline.

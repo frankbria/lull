@@ -1,0 +1,76 @@
+name: EAS OTA update
+
+# Continuous delivery to the installed dev/preview build (#33). On merge to main, publish an
+# over-the-air JS/asset bundle to the `preview` channel; the installed app pulls it on next
+# cold start (expo-updates checkAutomatically: ON_LOAD). Native changes (new module/permission
+# or a runtimeVersion bump) still need a fresh `eas build` install — OTA only ships JS/assets.
+
+on:
+  push:
+    branches: [main]
+    # Only run for changes that affect the app bundle (skip api-only / docs merges).
+    paths:
+      - "apps/mobile/**"
+      - "packages/**"
+      - "pnpm-lock.yaml"
+
+# One publish per ref; a newer push supersedes an in-flight update.
+concurrency:
+  group: eas-update-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update:
+    name: eas update (preview channel)
+    runs-on: ubuntu-latest
+    steps:
+      # EXPO_TOKEN is required to publish. Skip cleanly (no-op, stays green) when it isn't set
+      # yet, so the pipeline never blocks on a missing account credential.
+      - name: Check for Expo token
+        id: guard
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: echo "has_token=${EXPO_TOKEN:+true}" >> "$GITHUB_OUTPUT"
+
+      - name: Note skipped update
+        if: steps.guard.outputs.has_token != 'true'
+        run: echo "::notice::EXPO_TOKEN not set — skipping EAS OTA update."
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: steps.guard.outputs.has_token == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        if: steps.guard.outputs.has_token == 'true'
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.guard.outputs.has_token == 'true'
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+        if: steps.guard.outputs.has_token == 'true'
+
+      - uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385 # v9
+        if: steps.guard.outputs.has_token == 'true'
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Publish OTA update to preview channel
+        if: steps.guard.outputs.has_token == 'true'
+        working-directory: apps/mobile
+        # Values via env (not inline ${{ }}) so an attacker-crafted commit message can't inject shell.
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+          # Device-reachable API URL for standalone builds (Expo embeds EXPO_PUBLIC_* at bundle time).
+          # Set repo variable EXPO_PUBLIC_API_BASE to e.g. the dev box's Tailscale URL; without it the
+          # bundle keeps the localhost fallback (only useful in a simulator/web).
+          API_BASE_VAR: ${{ vars.EXPO_PUBLIC_API_BASE }}
+        run: |
+          # Only export when non-empty — App.tsx uses ?? so an empty string would wrongly "win".
+          [ -n "$API_BASE_VAR" ] && export EXPO_PUBLIC_API_BASE="$API_BASE_VAR"
+          # --channel (not --branch) targets the channel the installed preview build subscribes to.
+          eas update --channel preview --message "$MSG" --non-interactive
