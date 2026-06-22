@@ -77,6 +77,11 @@ ON_LOAD`). This is *not* store distribution (Sprint 6).
    eas build --profile preview --platform android   # subscribes the build to the `preview` channel
    ```
    Install the resulting APK on the device (open the build link, or `eas build:run`).
+3. **API base for the standalone build.** A built APK has no Metro host to derive the API URL from,
+   so it falls back to `localhost:8000` (the phone itself). Set the repo **variable**
+   `EXPO_PUBLIC_API_BASE` to a device-reachable API URL (e.g. the dev box's Tailscale URL,
+   `http://100.x.y.z:8000`): `gh variable set EXPO_PUBLIC_API_BASE`. The OTA workflow embeds it
+   into each published bundle.
 
 **How updates flow**
 - Merge to `main` → `.github/workflows/eas-update.yml` runs `eas update --branch preview` →

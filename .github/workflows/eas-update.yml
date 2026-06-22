@@ -65,7 +65,15 @@ jobs:
       - name: Publish OTA update to preview channel
         if: steps.guard.outputs.has_token == 'true'
         working-directory: apps/mobile
-        # Commit message via env (not inline ${{ }}) so an attacker-crafted message can't inject shell.
+        # Values via env (not inline ${{ }}) so an attacker-crafted commit message can't inject shell.
         env:
           MSG: ${{ github.event.head_commit.message }}
-        run: eas update --branch preview --message "$MSG" --non-interactive
+          # Device-reachable API URL for standalone builds (Expo embeds EXPO_PUBLIC_* at bundle time).
+          # Set repo variable EXPO_PUBLIC_API_BASE to e.g. the dev box's Tailscale URL; without it the
+          # bundle keeps the localhost fallback (only useful in a simulator/web).
+          API_BASE_VAR: ${{ vars.EXPO_PUBLIC_API_BASE }}
+        run: |
+          # Only export when non-empty — App.tsx uses ?? so an empty string would wrongly "win".
+          [ -n "$API_BASE_VAR" ] && export EXPO_PUBLIC_API_BASE="$API_BASE_VAR"
+          # --channel (not --branch) targets the channel the installed preview build subscribes to.
+          eas update --channel preview --message "$MSG" --non-interactive
