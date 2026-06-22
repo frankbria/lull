@@ -1,30 +1,32 @@
-# P[0.1.6] CI pipeline (GitHub Actions) — Issue #6
+# P[0.1.6a] CI: automated cross-family PR review independent of CodeRabbit — Issue #37
 
 ## Acceptance criteria
-- [ ] On PR: api `ruff` + `pytest`; mobile `tsc` typecheck + lint
-- [ ] Green required to merge; pipeline idempotent
-- [ ] Caches uv + pnpm for speed
+- [ ] On every PR, CI runs an automated review independent of CodeRabbit; surfaces findings (PR comment).
+- [ ] Findings visible on the PR; Critical/Major easy to triage before merge.
+- [ ] Resilient to a single reviewer being down (CodeRabbit down -> CI reviewer still posts).
+- [ ] Reviewer secrets stored as GitHub Actions secrets, not in the repo.
+- [ ] Idempotent; doesn't block on transient outages. Policy = **advisory**.
 
-## Adapted plan (monorepo: pnpm workspace + uv Python api)
+## Decisions (approved)
+- Reviewer: **OpenAI Codex** via `openai/codex-action` (SHA-pinned v1.8 `e0fdf01…`). Non-Claude, non-CodeRabbit.
+- Policy: **advisory** — posts a PR comment; NOT a required check; transient outage doesn't block.
+- Secret `OPENAI_API_KEY` added by owner **after merge**; workflow no-ops gracefully until then.
 
-1. **Mobile lint/typecheck scripts** (DONE locally, verified passing)
-   - Added devDeps `eslint@^9` + `eslint-config-expo` to `apps/mobile`
-   - `apps/mobile/eslint.config.js` (Expo flat config)
-   - `apps/mobile` scripts: `typecheck` = `tsc --noEmit`, `lint` = `eslint .`
-
-2. **Root `packageManager` field** -> `pnpm@10.27.0` so `pnpm/action-setup` auto-detects.
-
-3. **`.github/workflows/ci.yml`** — `on: pull_request` + `push: main`, with `concurrency`
-   (cancel stale runs = efficient + idempotent). Two independent jobs:
-   - **api** (`working-directory: apps/api`): `astral-sh/setup-uv` (enable-cache -> caches uv)
-     -> `uv sync` -> `uv run ruff check .` -> `uv run pytest -q`
-   - **mobile**: `pnpm/action-setup` -> `actions/setup-node` (`node-version-file: .nvmrc`,
-     `cache: pnpm`) -> `pnpm install --frozen-lockfile` -> `pnpm --filter mobile typecheck`
-     -> `pnpm --filter mobile lint`
-   - Jobs kept independent so follow-on #33 can drop in an `eas update` job on merge to main.
-
-4. **Branch protection** ("green required to merge") is a GitHub repo setting, not code.
-   Note it in the PR; offer to set via `gh api` (needs admin).
+## Plan
+1. New `.github/workflows/codex-review.yml` (separate from ci.yml — independent + easy to disable):
+   - `on: pull_request` [opened, reopened, synchronize, ready_for_review]; skip drafts (cost).
+   - `permissions: contents: read, pull-requests: write`; per-PR `concurrency` cancel-in-progress.
+   - **guard step**: read `OPENAI_API_KEY` into env; emit `has_key`. Empty (fork / unset) -> skip the
+     review + post steps. (This IS the resilience/skip path.)
+   - checkout `fetch-depth: 0` (needs base SHA for the diff).
+   - `openai/codex-action@<sha>`: `openai-api-key`, review `prompt` (diff vs base.sha; markdown grouped
+     Critical/Major first), `sandbox: read-only`, `output-file`. `continue-on-error: true` (advisory).
+   - **sticky comment**: marker `<!-- codex-review -->`, find-and-update-or-create via `gh api`
+     (idempotent — re-run updates in place, no comment spam).
+2. `ci.yml` unchanged; review job is NOT added to required checks (advisory).
+3. README: note the CI review step + that it needs `OPENAI_API_KEY`.
 
 ## Out of scope (YAGNI)
-- EAS Build / OTA (#33), deploy jobs, matrix builds, coverage gates.
+- Inline per-line comments + JSON-schema parsing (cookbook's heavier path) — sticky markdown summary
+  is enough for advisory triage; revisit if we make it blocking.
+- Label/size cost-gating — cancel-superseded + draft-skip cover it for now.
