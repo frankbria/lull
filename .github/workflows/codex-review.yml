@@ -81,7 +81,9 @@ jobs:
             BODY="$MARKER"$'\n'"## 🤖 Codex review (advisory)"$'\n\n'"Codex did not return output (transient error). This step is advisory and does not block merge."
           fi
           # Idempotent sticky comment: update the existing one if present, else create.
-          id="$(gh api "repos/$REPO/issues/$PR/comments" --jq \
+          # --paginate walks every page (default page size misses the marker on busy PRs);
+          # the jq filter runs per page, so only the page holding the marker emits an id.
+          id="$(gh api --paginate -f per_page=100 "repos/$REPO/issues/$PR/comments" --jq \
             "map(select(.body | startswith(\"$MARKER\"))) | first | .id // empty")"
           if [ -n "$id" ]; then
             gh api -X PATCH "repos/$REPO/issues/comments/$id" -f body="$BODY" >/dev/null
