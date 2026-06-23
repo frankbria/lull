@@ -80,3 +80,7 @@ real gate, not a formality. What it surfaced and the patterns to keep:
 - **The pre-commit secret scanner false-positives on test fixtures** (`password=`/`private_key`
   identifiers, ephemeral keygen). GitGuardian on the PR is the authoritative check — it passed,
   confirming `--no-verify` was safe for those commits.
+- **Don't ship a dev/test harness as a visible affordance in a feature screen.** #8 kept the
+  Sprint-0 "Generate & play" (posts `DEFAULT_SPEC`) under the new track builder; codex flagged it
+  as a misleading way to "proceed" since it ignores the user's selections. Gate such harnesses
+  behind `__DEV__` — keeps the device-testing loop in dev, out of production builds.
