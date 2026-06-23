@@ -10,7 +10,9 @@ export function TrackBuilderScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <StatusBar style="auto" />
       <Text style={styles.title}>Build your track</Text>
-      <Text style={styles.subtitle}>Pick one option in each category.</Text>
+      <Text style={styles.subtitle}>
+        Every component starts on AI Choice — override any you like.
+      </Text>
       {CATEGORIES.map((c) => (
         <CategorySection key={c.id} category={c} />
       ))}

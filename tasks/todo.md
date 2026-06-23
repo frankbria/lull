@@ -1,36 +1,46 @@
-# Issue #8 — P[1.1.1] US-001 Build a track by selecting components
+# US-002 — AI/random per-component, revealed in preview (issue #9)
 
-**Scope**: mobile-only (area:mobile). Selection UI + summary card. Generation/"proceed"
-is owned by #13 (Confirm & Generate) and #14 (real LLM) — NOT this story.
+**Self-authored plan** (issue had no plan comment). Builds directly on US-001's
+TrackBuilderContext / CategorySection / SummaryCard.
 
-## Acceptance Criteria
-- [ ] All four categories (induction, deepener, body, ending) render, ≥5 named options each + one-line description
-- [ ] Exactly one selection per category; persists across navigation (survives screen remount)
-- [ ] Summary card shows all four before proceeding
+## What the issue asks
+- AC1: Each component has an "AI Choice" — the default for first-time users, visually distinct.
+- AC2: The AI's actual pick is revealed in the script preview.
+- AC3: AI Choice is overridable per-component without disturbing others.
 
-## Design decisions
-- **Catalog** in `apps/mobile/src/catalog.ts` (mobile-local; the API COMPONENTS dict has only
-  2–3/category and syncing it is #13/#14's concern). 4 categories × 5 options = `{id, name, blurb}`.
-  Reuse existing API ids where they exist; add the rest. ponytail-comment the API gap.
-- **State** via a small React Context (`TrackBuilderContext`) holding the 4 selections + setters.
-  Provider wraps the app → selections survive screen unmount/remount = "persists across navigation".
-  No nav library (YAGNI — single screen; real multi-screen flow lands with later stories).
-- **Existing sprint-0 generate-and-play** harness is preserved (device testing keeps working),
-  rendered below the builder, still using DEFAULT_SPEC. Assembled-spec generation = #13.
+## Design (lazy)
+There is no real LLM yet (#14), so "AI Choice" = the system picks one option at
+random per category. The sentinel `"ai"` becomes a valid selection value and the
+**default** for every category, so a first-time user starts fully AI-picked.
 
-## Files
-- `apps/mobile/src/catalog.ts` — CATEGORIES + options (the only new "data")
-- `apps/mobile/src/TrackBuilderContext.tsx` — provider + `useTrackBuilder()` hook
-- `apps/mobile/src/CategorySection.tsx` — one category, single-select rows
-- `apps/mobile/src/SummaryCard.tsx` — shows the 4 chosen names
-- `apps/mobile/src/TrackBuilderScreen.tsx` — sections + summary (+ kept harness)
-- `apps/mobile/App.tsx` — wrap in provider, render screen
-- Test runner: add `jest-expo` + `@testing-library/react-native`, jest config, `test` script
-- CI: add `pnpm --filter mobile test` step (idempotent)
+- `Selections` value goes from `string | null` → `string` (concrete id **or** `"ai"`).
+  Default = `"ai"` for all four categories (no more "not chosen" state).
+- Provider holds `aiPicks: Record<CategoryId, string>` — the concrete option the AI
+  picked per category, computed **once** per provider mount so the preview is stable.
+  An optional `aiPicker` prop makes this deterministic in tests (default = random).
+- CategorySection renders an "AI Choice" pseudo-option at the top, visually distinct,
+  selected by default. The concrete options sit below.
+- SummaryCard ("Your track" preview) always shows now; for an AI category it reveals
+  the actual picked option name with an "AI Choice" marker. AC3 is already satisfied
+  by `select` only touching one key.
 
-## TDD steps
-1. RED: tests — 4 categories render w/ ≥5 options; single-select per category; summary shows all 4;
-   selection persists across remount (Context).
-2. GREEN: catalog → context → components → screen → App wiring.
-3. REFACTOR + deslop, lint, typecheck, coverage ≥85%.
-4. Demo every AC (Phase 11), open PR, CI + review gates, merge.
+## Steps (TDD: tests first)
+1. **catalog.ts** — export `AI_CHOICE = "ai"` sentinel.
+2. **TrackBuilderContext.tsx** — default selections all `"ai"`; add stable `aiPicks`
+   + optional `aiPicker` prop; expose `aiPicks` on context.
+3. **CategorySection.tsx** — AI Choice option (distinct style, `testID=option-<cat>-ai`),
+   selected when value is `"ai"`.
+4. **SummaryCard.tsx** — always render; reveal AI's actual pick + marker for ai rows.
+5. **__tests__/trackBuilder.test.tsx** — update US-001 tests for new default; add:
+   default is AI for every category; preview reveals the deterministic AI pick;
+   overriding one category leaves the others on AI; revert concrete -> AI.
+
+## Verify
+`npm test`, `npm run typecheck`, `npm run lint` in apps/mobile — all green.
+
+## Deviations / assumptions
+- Self-authored; no plan existed on the issue.
+- "Default for first-time users" is read as the in-memory initial state (all AI) —
+  no persistence/first-run layer exists yet, so YAGNI.
+- "AI" is random per-component until the real LLM lands (#14); stable per session.
+- Mobile-local, consistent with US-001 (no API change).
