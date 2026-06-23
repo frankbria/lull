@@ -47,7 +47,7 @@ jobs:
       - run: uv run pytest -q
 
   mobile:
-    name: mobile (typecheck + lint)
+    name: mobile (typecheck + lint + test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
