@@ -83,6 +83,15 @@ describe("ScriptPreview (US-004)", () => {
     expect(screen.getByTestId("continue-audio").props.accessibilityState.disabled).toBe(false);
   });
 
+  it("surfaces an error instead of leaking an unhandled rejection when audio fails", async () => {
+    const onProceed = jest.fn().mockRejectedValue(new Error("tts 502"));
+    renderPreview({ onProceed });
+    await screen.findByTestId("continue-audio");
+    scrollTo(400, 300, 1000); // unlock
+    fireEvent.press(screen.getByTestId("continue-audio"));
+    expect(await screen.findByTestId("preview-error")).toHaveTextContent(/tts 502/);
+  });
+
   it("regenerates the script without changing components, re-gating the scroll", async () => {
     renderPreview();
     await screen.findByTestId("script-text");

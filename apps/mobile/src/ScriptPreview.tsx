@@ -10,7 +10,7 @@ import { useTrackBuilder } from "./TrackBuilderContext";
 // today. Wiring the builder's per-component picks into the spec is #13 (Confirm & Generate).
 interface Props {
   onBack: () => void;
-  onProceed: (scriptText: string) => void;
+  onProceed: (scriptText: string) => void | Promise<void>;
 }
 
 export function ScriptPreview({ onBack, onProceed }: Props) {
@@ -20,6 +20,10 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
   const [error, setError] = useState<string | null>(null);
   // The scroll gate: false until the user has read ≥50% of the script. Reset on every (re)generate.
   const [unlocked, setUnlocked] = useState(false);
+  // Bumped per generation; keys the ScrollView so a regenerated script remounts and fires fresh
+  // layout/content-size callbacks — otherwise a short script with an unchanged height could leave
+  // the gate stuck (no scroll range, no measure callback). Also resets scroll to the top.
+  const [generation, setGeneration] = useState(0);
 
   // Latest measured viewport/content heights, so a short script that fits without scrolling can
   // unlock on layout (the user can already see ≥50%) rather than trapping them.
@@ -35,6 +39,7 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
     setBusy(true);
     setError(null);
     setUnlocked(false); // a fresh script must be re-read before proceeding to audio
+    contentH.current = 0; // force the next measure callback to re-decide the gate
     try {
       const res = await fetch(`${apiBase()}/script`, {
         method: "POST",
@@ -43,6 +48,7 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
       });
       if (!res.ok) throw new Error(`/script ${res.status}`);
       setResult((await res.json()) as ScriptResponse);
+      setGeneration((g) => g + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -65,7 +71,11 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
       <Text style={styles.title}>Your script</Text>
 
       {busy && !result && <ActivityIndicator style={styles.spacer} />}
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error && (
+        <Text testID="preview-error" style={styles.error}>
+          {error}
+        </Text>
+      )}
 
       {result && (
         <>
@@ -73,6 +83,7 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
             Estimated length: {formatDuration(result.est_seconds)}
           </Text>
           <ScrollView
+            key={generation}
             testID="script-scroll"
             style={styles.scroll}
             scrollEventThrottle={16}
@@ -111,7 +122,14 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
               testID="continue-audio"
               accessibilityState={{ disabled: !unlocked }}
               disabled={!unlocked}
-              onPress={() => onProceed(result.script)}
+              // onProceed (audio synthesis + playback) can reject on network/audio failure; surface
+              // it like the generate path instead of leaking an unhandled rejection.
+              onPress={() => {
+                setError(null);
+                Promise.resolve(onProceed(result.script)).catch((e) =>
+                  setError(e instanceof Error ? e.message : String(e)),
+                );
+              }}
               style={[styles.button, styles.primary, !unlocked && styles.buttonDisabled]}
             >
               <Text style={styles.primaryText}>Continue to audio</Text>
