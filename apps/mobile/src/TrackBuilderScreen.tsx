@@ -15,7 +15,9 @@ export function TrackBuilderScreen() {
         <CategorySection key={c.id} category={c} />
       ))}
       <SummaryCard />
-      <Sprint0Harness />
+      {/* Dev-only: generates from DEFAULT_SPEC (not the selections), kept for the device-testing
+          loop. Generating from the assembled spec is #13. __DEV__ keeps it out of real builds. */}
+      {__DEV__ && <Sprint0Harness />}
     </ScrollView>
   );
 }
