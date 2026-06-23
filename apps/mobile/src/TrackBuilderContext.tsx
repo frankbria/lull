@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { AI_CHOICE, CATEGORIES, type Category, type CategoryId } from "./catalog";
+import { loadHypnosis, saveHypnosis } from "./preferences";
 
 // One selection per category: a concrete option id, or AI_CHOICE meaning "let the AI pick".
 // State lives here, above the screen, so selections survive a screen unmount/remount =
@@ -25,6 +26,9 @@ interface TrackBuilderValue {
   // doesn't change on every render. Revealed in the preview when a category is on AI_CHOICE.
   aiPicks: Selections;
   select: (category: CategoryId, optionId: string) => void; // single-select: replaces prior pick
+  // True Hypnosis (true) vs Plain Meditation (false). Persisted, feeds the generation spec (US-003).
+  hypnosis: boolean;
+  setHypnosis: (value: boolean) => void;
 }
 
 const TrackBuilderContext = createContext<TrackBuilderValue | null>(null);
@@ -43,8 +47,32 @@ export function TrackBuilderProvider({
   );
   const select = (category: CategoryId, optionId: string) =>
     setSelections((s) => ({ ...s, [category]: optionId }));
+
+  // Hypnosis-vs-meditation preference: default until the saved value loads on mount, then persist
+  // on every change so it's pre-filled next launch (US-003).
+  const [hypnosis, setHypnosisState] = useState(true); // True Hypnosis is the first-time default.
+  // Set once the user picks, so a slow load can't clobber a choice made before it resolved.
+  const userSetRef = useRef(false);
+  useEffect(() => {
+    let active = true;
+    // Apply the stored value only if it exists (non-null) and the user hasn't already chosen.
+    loadHypnosis().then((v) => {
+      if (active && v !== null && !userSetRef.current) setHypnosisState(v);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const setHypnosis = (value: boolean) => {
+    userSetRef.current = true;
+    setHypnosisState(value);
+    void saveHypnosis(value);
+  };
+
   return (
-    <TrackBuilderContext.Provider value={{ selections, aiPicks, select }}>
+    <TrackBuilderContext.Provider
+      value={{ selections, aiPicks, select, hypnosis, setHypnosis }}
+    >
       {children}
     </TrackBuilderContext.Provider>
   );
