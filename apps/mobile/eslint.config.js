@@ -7,4 +7,8 @@ module.exports = defineConfig([
   {
     ignores: ["dist/*", ".expo/*", "node_modules/*"],
   },
+  {
+    files: ["**/*.test.{ts,tsx}", "**/__tests__/**"],
+    languageOptions: { globals: { describe: true, it: true, expect: true, jest: true } },
+  },
 ]);

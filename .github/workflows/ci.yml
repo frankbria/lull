@@ -47,7 +47,7 @@ jobs:
       - run: uv run pytest -q
 
   mobile:
-    name: mobile (typecheck + lint)
+    name: mobile (typecheck + lint + test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,3 +59,4 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter mobile typecheck
       - run: pnpm --filter mobile lint
+      - run: pnpm --filter mobile test

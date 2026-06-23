@@ -18,7 +18,7 @@ Discovery complete. See [`docs/PRD.md`](docs/PRD.md) for the full product requir
 ```
 apps/
   api/        FastAPI backend — script assembly + ElevenLabs TTS via the AudioSource seam (runnable, tested)
-  mobile/     Expo / React Native app — Sprint-0 test harness (init with `npx expo install`)
+  mobile/     Expo / React Native app — track builder (component selection) + Sprint-0 test harness
 packages/
   shared/     TypeScript contract types shared by client + API
 docs/         PRD, roadmap, architecture, naming research
