@@ -59,3 +59,4 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter mobile typecheck
       - run: pnpm --filter mobile lint
+      - run: pnpm --filter mobile test
