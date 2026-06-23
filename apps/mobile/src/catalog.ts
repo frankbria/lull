@@ -6,6 +6,10 @@
 
 export type CategoryId = "induction" | "deepener" | "body" | "ending";
 
+// Sentinel selection value meaning "let the AI pick this component" (US-002). It is a valid
+// selection — the default for first-time users — distinct from any concrete option id.
+export const AI_CHOICE = "ai" as const;
+
 export interface ComponentOption {
   id: string;
   name: string;

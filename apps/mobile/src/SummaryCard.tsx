@@ -1,20 +1,22 @@
 import { StyleSheet, Text, View } from "react-native";
-import { CATEGORIES } from "./catalog";
+import { AI_CHOICE, CATEGORIES } from "./catalog";
 import { useTrackBuilder } from "./TrackBuilderContext";
 
-// Shows the four chosen components once every category has a selection ("before proceeding").
+// The script preview. Every category always has a selection (AI_CHOICE by default), so this
+// shows from the start and reveals the AI's actual pick for any category still on AI Choice.
 export function SummaryCard() {
-  const { selections } = useTrackBuilder();
-  const allChosen = CATEGORIES.every((c) => selections[c.id]);
-  if (!allChosen) return null;
+  const { selections, aiPicks } = useTrackBuilder();
   return (
     <View style={styles.card} accessibilityLabel="Track summary">
       <Text style={styles.title}>Your track</Text>
       {CATEGORIES.map((c) => {
-        const opt = c.options.find((o) => o.id === selections[c.id]);
+        const isAi = selections[c.id] === AI_CHOICE;
+        const chosenId = isAi ? aiPicks[c.id] : selections[c.id];
+        const opt = c.options.find((o) => o.id === chosenId);
         return (
           <Text key={c.id} style={styles.row}>
             {c.label}: {opt?.name}
+            {isAi ? " (AI Choice)" : ""}
           </Text>
         );
       })}
