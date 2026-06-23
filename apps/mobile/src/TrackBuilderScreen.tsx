@@ -2,6 +2,7 @@ import { ScrollView, StyleSheet, Text } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { CATEGORIES } from "./catalog";
 import { CategorySection } from "./CategorySection";
+import { HypnosisToggle } from "./HypnosisToggle";
 import { SummaryCard } from "./SummaryCard";
 import { Sprint0Harness } from "./Sprint0Harness";
 
@@ -13,6 +14,7 @@ export function TrackBuilderScreen() {
       <Text style={styles.subtitle}>
         Every component starts on AI Choice — override any you like.
       </Text>
+      <HypnosisToggle />
       {CATEGORIES.map((c) => (
         <CategorySection key={c.id} category={c} />
       ))}

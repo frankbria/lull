@@ -6,6 +6,7 @@ import { createAudioPlayer } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
 import Constants from "expo-constants";
 import { DEFAULT_SPEC, type ScriptResponse } from "@lull/shared";
+import { useTrackBuilder } from "./TrackBuilderContext";
 
 // Sprint-0 test harness: build a script, render to audio, and play it.
 // ponytail: still wired to DEFAULT_SPEC so the device-testing loop keeps working. Generating from
@@ -22,6 +23,7 @@ function devApiBase(): string | undefined {
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE ?? devApiBase() ?? "http://localhost:8000";
 
 export function Sprint0Harness() {
+  const { hypnosis } = useTrackBuilder();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ScriptResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,10 +48,12 @@ export function Sprint0Harness() {
     setError(null);
     cleanupPlayback(); // release any prior player/Blob URL before a new run
     try {
+      // Components still come from DEFAULT_SPEC (assembled-spec generation is #13), but the
+      // hypnosis-vs-meditation toggle feeds the prompt now (US-003).
       const sres = await fetch(`${API_BASE}/script`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(DEFAULT_SPEC),
+        body: JSON.stringify({ ...DEFAULT_SPEC, hypnosis }),
       });
       if (!sres.ok) throw new Error(`/script ${sres.status}`);
       const script: ScriptResponse = await sres.json();

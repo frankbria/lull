@@ -84,3 +84,11 @@ real gate, not a formality. What it surfaced and the patterns to keep:
   Sprint-0 "Generate & play" (posts `DEFAULT_SPEC`) under the new track builder; codex flagged it
   as a misleading way to "proceed" since it ignores the user's selections. Gate such harnesses
   behind `__DEV__` — keeps the device-testing loop in dev, out of production builds.
+- **Async-hydrated state (AsyncStorage) has two traps: a load can clobber a fast user edit, and
+  it warns under `act(...)` in tests.** US-003's persisted toggle defaults in `useState`, then a
+  mount effect overrides from storage. Fixes: (1) a `userSetRef` set in the setter so the async
+  load skips `setState` once the user has chosen — kills the clobber for free, no extra state;
+  (2) have `loadHypnosis()` return `boolean | null` (null = nothing stored) so cleared-storage
+  tests dispatch no update at all → no `act` warnings, default lives once in `useState`. Resist a
+  `hydrated` flag to gate a __DEV__-only harness button: it fires `setState` on every mount,
+  reintroducing warnings suite-wide to defend a race a human can't win against a ~1ms read.
