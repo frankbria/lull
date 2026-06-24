@@ -38,10 +38,14 @@ function scrollTo(offsetY: number, viewportH: number, contentH: number) {
 }
 
 describe("ScriptPreview (US-004)", () => {
+  const originalFetch = global.fetch;
   let fetchMock: jest.Mock;
   beforeEach(() => {
     fetchMock = mockFetch();
     global.fetch = fetchMock as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    global.fetch = originalFetch; // don't leak the mock into other suites
   });
 
   const scriptCalls = () =>

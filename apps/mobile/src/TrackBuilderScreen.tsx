@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { synthesizeAndPlay } from "./audio";
@@ -16,10 +16,20 @@ export function TrackBuilderScreen() {
   const [phase, setPhase] = useState<"build" | "preview">("build");
   // Audio cleanup (player release / Blob URL revoke) from a "Continue to audio" handoff.
   const audioCleanup = useRef<(() => void) | null>(null);
+  const audioBusy = useRef(false); // serialize handoffs so rapid taps can't orphan a player
+  // Release the player if the user leaves the screen mid-playback.
+  useEffect(() => () => audioCleanup.current?.(), []);
 
   async function proceedToAudio(scriptText: string) {
-    audioCleanup.current?.();
-    audioCleanup.current = await synthesizeAndPlay(scriptText);
+    if (audioBusy.current) return; // a synth/play run is already in flight
+    audioBusy.current = true;
+    try {
+      audioCleanup.current?.(); // release any prior player before starting a new one
+      audioCleanup.current = null;
+      audioCleanup.current = await synthesizeAndPlay(scriptText);
+    } finally {
+      audioBusy.current = false;
+    }
   }
 
   if (phase === "preview") {

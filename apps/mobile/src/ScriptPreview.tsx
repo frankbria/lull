@@ -88,6 +88,9 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
             key={generation}
             testID="script-scroll"
             style={styles.scroll}
+            // The screen wraps this in an outer ScrollView; Android needs this for the inner one to
+            // scroll independently (and fire onScroll), otherwise the 50% gate can never unlock.
+            nestedScrollEnabled
             scrollEventThrottle={16}
             onLayout={(e) => {
               viewportH.current = e.nativeEvent.layout.height;
