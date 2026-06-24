@@ -92,3 +92,23 @@ real gate, not a formality. What it surfaced and the patterns to keep:
   tests dispatch no update at all → no `act` warnings, default lives once in `useState`. Resist a
   `hydrated` flag to gate a __DEV__-only harness button: it fires `setState` on every mount,
   reintroducing warnings suite-wide to defend a race a human can't win against a ~1ms read.
+
+## Script-preview scroll gate (from US-004 / #11)
+A web/RNTL demo + cross-family review caught three things unit tests alone missed:
+
+- **"Scrolled ≥50%" means scroll *position*, not *visible fraction*.** First cut unlocked when
+  `(offsetY + viewportH) / contentH ≥ 0.5`, so a script only slightly taller than its box showed
+  ≥50% at the top and unlocked with **zero** scrolling. Gate on `offsetY / (contentH - viewportH)`
+  instead; treat `contentH ≤ viewportH` (fits entirely) as already-unlocked so short scripts don't
+  trap. The live demo is what exposed it — the math "looked right" in tests.
+- **Nested vertical `ScrollView` needs `nestedScrollEnabled` on Android.** An inner scroll area
+  inside the screen's outer `ScrollView` won't scroll (or fire `onScroll`) on Android without it —
+  the 50% gate would never unlock on a real device though web worked fine.
+- **Re-gate by remounting the inner ScrollView (`key={generation}`).** `onContentSizeChange` only
+  fires when the size *changes*; regenerating a same-height script otherwise leaves the gate stuck.
+  Bumping a `key` forces fresh layout/content-size callbacks and resets scroll to top.
+- **`toHaveTextContent("...")` is exact-match here, not substring** — use a regex
+  (`toHaveTextContent(/2:10/)`) to assert a fragment.
+- **Async press handlers must catch.** A `Pressable` calling an async `onProceed` un-awaited leaks
+  unhandled rejections; wrap in `Promise.resolve(onProceed(...)).catch(setError)` and serialize the
+  handoff with an in-flight ref so rapid taps can't orphan a player.
