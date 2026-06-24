@@ -115,9 +115,13 @@ def _map_status_error(code: int) -> AudioSourceError:
     )
 
 
-def get_audio_source(settings: Settings) -> AudioSource:
+def get_audio_source(settings: Settings, voice_id: str | None = None) -> AudioSource:
+    # voice_id overrides the configured default per call (US-005: a persona's voice); None keeps
+    # the single config voice for the non-persona path.
     if settings.audio_source == "elevenlabs":
         if not settings.elevenlabs_api_key:
             raise RuntimeError("LULL_AUDIO_SOURCE=elevenlabs but LULL_ELEVENLABS_API_KEY is unset")
-        return ElevenLabsAudioSource(settings.elevenlabs_api_key, settings.elevenlabs_voice_id)
+        return ElevenLabsAudioSource(
+            settings.elevenlabs_api_key, voice_id or settings.elevenlabs_voice_id
+        )
     return StubAudioSource()

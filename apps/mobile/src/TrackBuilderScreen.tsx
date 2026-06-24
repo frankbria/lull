@@ -7,6 +7,8 @@ import { CategorySection } from "./CategorySection";
 import { HypnosisToggle } from "./HypnosisToggle";
 import { ScriptPreview } from "./ScriptPreview";
 import { SummaryCard } from "./SummaryCard";
+import { useTrackBuilder } from "./TrackBuilderContext";
+import { VoicePicker } from "./VoicePicker";
 import { Sprint0Harness } from "./Sprint0Harness";
 
 // Two phases on one screen — no router yet (YAGNI). "build" picks the components; "Generate script"
@@ -14,11 +16,20 @@ import { Sprint0Harness } from "./Sprint0Harness";
 // TrackBuilderContext above this screen, so switching phases preserves the chosen components.
 export function TrackBuilderScreen() {
   const [phase, setPhase] = useState<"build" | "preview">("build");
+  const { voiceId } = useTrackBuilder();
   // Audio cleanup (player release / Blob URL revoke) from a "Continue to audio" handoff.
   const audioCleanup = useRef<(() => void) | null>(null);
   const audioBusy = useRef(false); // serialize handoffs so rapid taps can't orphan a player
   // Release the player if the user leaves the screen mid-playback.
   useEffect(() => () => audioCleanup.current?.(), []);
+
+  // US-005/FR-V4: changing the voice after a track has been rendered must trigger a re-render. With
+  // no persisted track yet, that means dropping the now-stale audio so the next "Continue to audio"
+  // re-synthesizes in the newly chosen voice. (Skips the initial mount/load — cleanup is null then.)
+  useEffect(() => {
+    audioCleanup.current?.();
+    audioCleanup.current = null;
+  }, [voiceId]);
 
   async function proceedToAudio(scriptText: string) {
     if (audioBusy.current) return; // a synth/play run is already in flight
@@ -26,7 +37,7 @@ export function TrackBuilderScreen() {
     try {
       audioCleanup.current?.(); // release any prior player before starting a new one
       audioCleanup.current = null;
-      audioCleanup.current = await synthesizeAndPlay(scriptText);
+      audioCleanup.current = await synthesizeAndPlay(scriptText, voiceId);
     } finally {
       audioBusy.current = false;
     }
@@ -52,6 +63,7 @@ export function TrackBuilderScreen() {
       {CATEGORIES.map((c) => (
         <CategorySection key={c.id} category={c} />
       ))}
+      <VoicePicker />
       <SummaryCard />
       <Pressable
         testID="generate-script"

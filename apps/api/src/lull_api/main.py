@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Callable
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
@@ -19,6 +20,7 @@ from .entitlements import (
     reserve_guest_generation,
 )
 from .models import User
+from .personas import PREVIEW_TEXT, resolve_voice_id
 from .scripts import TrackSpec, build_script
 from .security import decode_guest_token
 
@@ -54,6 +56,7 @@ class ScriptOut(BaseModel):
 
 class TtsIn(BaseModel):
     text: str
+    persona_id: str | None = None  # US-005: which voice to render; None => configured default
 
 
 @app.get("/health")
@@ -84,20 +87,52 @@ def generate_script(spec_in: TrackSpecIn) -> ScriptOut:
     )
 
 
-def get_source() -> AudioSource:
-    """Resolve the configured AudioSource; surface config errors as a clear 503."""
-    try:
-        return get_audio_source(settings)
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=503, detail={"message": str(exc), "retryable": False}
-        ) from exc
+def get_source_factory() -> Callable[[str | None], AudioSource]:
+    """A factory that builds an AudioSource for a given voice id (US-005: persona voices vary per
+    request, so the source can't be a single fixed dependency). Config errors surface as a 503."""
+
+    def make(voice_id: str | None = None) -> AudioSource:
+        try:
+            return get_audio_source(settings, voice_id)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=503, detail={"message": str(exc), "retryable": False}
+            ) from exc
+
+    return make
+
+
+# Each persona's preview (fixed text + fixed voice) is deterministic, so synthesize it at most once
+# and serve from memory after — that caps billable ElevenLabs calls on this ungated endpoint to one
+# per persona, closing the repeat-request cost vector. ponytail: in-process cache; a shared cache or
+# CDN if this ever runs multi-instance.
+_preview_cache: dict[str, tuple[bytes, str]] = {}
+
+
+@app.get("/voices/{persona_id}/preview")
+async def voice_preview(
+    persona_id: str,
+    make_source: Callable[[str | None], AudioSource] = Depends(get_source_factory),
+) -> Response:
+    """A short, fixed sample in the persona's voice (FR-V2). Ungated on purpose: a preview must not
+    burn the user's free generation, and the text is server-fixed so it can't be abused for a full
+    render. The first hit per persona synthesizes; the rest are served from cache."""
+    voice_id = resolve_voice_id(persona_id)
+    if voice_id is None:
+        raise HTTPException(status_code=404, detail="unknown voice persona")
+    cached = _preview_cache.get(persona_id)
+    if cached is None:
+        source = make_source(voice_id)
+        cached = (await _synthesize(source, PREVIEW_TEXT), source.media_type)
+        _preview_cache[persona_id] = cached
+    audio, media_type = cached
+    return Response(content=audio, media_type=media_type)
 
 
 @app.post("/tts")
 async def tts(
     body: TtsIn,
-    source: AudioSource = Depends(get_source),
+    make_source: Callable[[str | None], AudioSource] = Depends(get_source_factory),
     user: User | None = Depends(current_user_optional),
     db: Session = Depends(get_db),
     x_guest_token: str | None = Header(default=None),
@@ -113,6 +148,15 @@ async def tts(
     # Hard char cap enforced BEFORE any (billable) outbound call.
     if len(body.text) > settings.max_script_chars:
         raise HTTPException(status_code=422, detail="text exceeds max_script_chars")
+
+    # Resolve the chosen persona to a voice (US-005); reject an unknown one before any gating/charge.
+    voice_id: str | None = None
+    if body.persona_id is not None:
+        voice_id = resolve_voice_id(body.persona_id)
+        if voice_id is None:
+            raise HTTPException(status_code=422, detail="unknown voice persona")
+    # Build the source before the gate so a config error (missing key) is a clear 503, as before.
+    source = make_source(voice_id)
 
     guest_id: uuid.UUID | None = None
     if user is not None:
