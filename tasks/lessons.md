@@ -112,3 +112,26 @@ A web/RNTL demo + cross-family review caught three things unit tests alone misse
 - **Async press handlers must catch.** A `Pressable` calling an async `onProceed` un-awaited leaks
   unhandled rejections; wrap in `Promise.resolve(onProceed(...)).catch(setError)` and serialize the
   handoff with an in-flight ref so rapid taps can't orphan a player.
+
+## US-005 — Voice persona selection + preview (#12)
+- **An ungated public endpoint that triggers a paid call needs a cost cap, and the cap must hold
+  under concurrency.** A simple result-cache still lets a burst of concurrent *cold* requests each
+  fire the billable call. Cache the in-flight `asyncio.Task` (single-flight) so overlapping callers
+  share one synthesis — store the task *before* the first `await`.
+- **Caching an `asyncio.Task` needs failure + cancellation eviction or it poisons the cache.**
+  `await task` directly lets a cancelled request cancel the *shared* task, and `CancelledError` is a
+  `BaseException` that `except Exception` won't catch. Use `await asyncio.shield(task)` for request
+  awaits, and evict via `task.add_done_callback` checking `t.cancelled() or t.exception()` — a
+  done-callback covers every exit path.
+- **Any "store the cleanup after an await" pattern races against state changing mid-flight.** A
+  synth/preview that resolves after the user changed the voice (or unmounted) would store/play a
+  stale player. Capture a token (or `mounted` ref) before the await; if it changed when the promise
+  resolves, run the returned cleanup immediately and don't store it.
+- **A dev DB one migration behind 500s the whole gated path.** `guest_credits` wasn't applied to
+  the dev `lull` db, so every `/tts` 500'd in the live demo though all tests (isolated, migrated
+  test DB) passed. Run `alembic upgrade head` on the dev DB before a live API demo; an env-state
+  500 looks like a code bug until you read the traceback (`relation ... does not exist`).
+- **The persona abstraction is a deliberate client/server split:** public `{id,name,descriptor}` in
+  `@lull/shared`, secret `id→voice_id` map server-only — same pattern as the component catalog
+  (mobile `catalog.ts` ↔ api `scripts.py`). `loadVoice` drops a stored id no longer in the catalog
+  so a removed persona falls back to the default instead of 422-ing `/tts`.
