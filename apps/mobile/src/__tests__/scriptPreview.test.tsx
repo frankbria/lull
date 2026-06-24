@@ -67,8 +67,14 @@ describe("ScriptPreview (US-004)", () => {
     fireEvent.press(before);
     expect(onProceed).not.toHaveBeenCalled();
 
-    // (offset + viewport) / content = (400+300)/1000 = 0.7 ≥ 0.5 → unlocked.
-    scrollTo(400, 300, 1000);
+    // Scrollable range = content − viewport = 700. At the top, and at <50% of the range, the gate
+    // stays shut — the AC is "scrolled ≥50%", not "≥50% visible".
+    scrollTo(0, 300, 1000);
+    expect(screen.getByTestId("continue-audio").props.accessibilityState.disabled).toBe(true);
+    scrollTo(300, 300, 1000); // 300/700 ≈ 0.43 < 0.5
+    expect(screen.getByTestId("continue-audio").props.accessibilityState.disabled).toBe(true);
+
+    scrollTo(400, 300, 1000); // 400/700 ≈ 0.57 ≥ 0.5 → unlocked
     const after = screen.getByTestId("continue-audio");
     expect(after.props.accessibilityState.disabled).toBe(false);
     fireEvent.press(after);

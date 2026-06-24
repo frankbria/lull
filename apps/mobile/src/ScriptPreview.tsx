@@ -31,8 +31,10 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
   const contentH = useRef(0);
   const evaluate = useCallback((offsetY: number, vH: number, cH: number) => {
     if (cH <= 0 || vH <= 0) return;
-    // Fraction of the script whose bottom edge has scrolled into view.
-    if ((offsetY + vH) / cH >= 0.5) setUnlocked(true);
+    const scrollable = cH - vH;
+    // Fits entirely → already fully visible, don't trap the user. Otherwise the AC is literal:
+    // the gate opens once they've scrolled ≥50% of the way down the script.
+    if (scrollable <= 0 || offsetY / scrollable >= 0.5) setUnlocked(true);
   }, []);
 
   const generate = useCallback(async () => {
@@ -65,7 +67,7 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
 
   return (
     <View style={styles.container}>
-      <Pressable testID="back-to-track" onPress={onBack} hitSlop={8}>
+      <Pressable testID="back-to-track" accessibilityRole="button" onPress={onBack} hitSlop={8}>
         <Text style={styles.back}>← Back to track</Text>
       </Pressable>
       <Text style={styles.title}>Your script</Text>
@@ -112,6 +114,7 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
           <View style={styles.actions}>
             <Pressable
               testID="regenerate"
+              accessibilityRole="button"
               onPress={() => void generate()}
               disabled={busy}
               style={[styles.button, styles.secondary, busy && styles.buttonDisabled]}
@@ -120,6 +123,7 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
             </Pressable>
             <Pressable
               testID="continue-audio"
+              accessibilityRole="button"
               accessibilityState={{ disabled: !unlocked }}
               disabled={!unlocked}
               // onProceed (audio synthesis + playback) can reject on network/audio failure; surface

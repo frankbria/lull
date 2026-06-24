@@ -43,7 +43,12 @@ export function TrackBuilderScreen() {
         <CategorySection key={c.id} category={c} />
       ))}
       <SummaryCard />
-      <Pressable testID="generate-script" style={styles.generate} onPress={() => setPhase("preview")}>
+      <Pressable
+        testID="generate-script"
+        accessibilityRole="button"
+        style={styles.generate}
+        onPress={() => setPhase("preview")}
+      >
         <Text style={styles.generateText}>Generate script</Text>
       </Pressable>
       {/* Dev-only quick audio check from DEFAULT_SPEC; __DEV__ keeps it out of real builds. */}
