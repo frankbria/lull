@@ -20,13 +20,18 @@ export function TrackBuilderScreen() {
   // Audio cleanup (player release / Blob URL revoke) from a "Continue to audio" handoff.
   const audioCleanup = useRef<(() => void) | null>(null);
   const audioBusy = useRef(false); // serialize handoffs so rapid taps can't orphan a player
+  // Bumped whenever the current render is invalidated (voice change / unmount); a synth that finishes
+  // under a stale token discards its player instead of playing the wrong voice.
+  const playToken = useRef(0);
   // Release the player if the user leaves the screen mid-playback.
   useEffect(() => () => audioCleanup.current?.(), []);
 
   // US-005/FR-V4: changing the voice after a track has been rendered must trigger a re-render. With
   // no persisted track yet, that means dropping the now-stale audio so the next "Continue to audio"
-  // re-synthesizes in the newly chosen voice. (Skips the initial mount/load — cleanup is null then.)
+  // re-synthesizes in the newly chosen voice — and invalidating any synth still in flight under the
+  // old voice. (Skips the initial mount/load — cleanup is null then.)
   useEffect(() => {
+    playToken.current += 1;
     audioCleanup.current?.();
     audioCleanup.current = null;
   }, [voiceId]);
@@ -34,10 +39,17 @@ export function TrackBuilderScreen() {
   async function proceedToAudio(scriptText: string) {
     if (audioBusy.current) return; // a synth/play run is already in flight
     audioBusy.current = true;
+    const token = playToken.current;
     try {
       audioCleanup.current?.(); // release any prior player before starting a new one
       audioCleanup.current = null;
-      audioCleanup.current = await synthesizeAndPlay(scriptText, voiceId);
+      const cleanup = await synthesizeAndPlay(scriptText, voiceId);
+      // Voice changed while we were synthesizing → this playback is in the old voice; discard it.
+      if (token !== playToken.current) {
+        cleanup();
+        return;
+      }
+      audioCleanup.current = cleanup;
     } finally {
       audioBusy.current = false;
     }

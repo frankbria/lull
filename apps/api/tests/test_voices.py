@@ -1,8 +1,10 @@
+import asyncio
+
 import httpx
 from fastapi.testclient import TestClient
 
 from lull_api import main
-from lull_api.audio import ElevenLabsAudioSource
+from lull_api.audio import ElevenLabsAudioSource, StubAudioSource
 from lull_api.main import app, get_source_factory
 from lull_api.personas import PERSONA_VOICE_IDS, resolve_voice_id
 
@@ -69,6 +71,29 @@ def test_preview_is_cached_after_first_synthesis():
     assert client.get("/voices/aria/preview").status_code == 200
     assert client.get("/voices/aria/preview").status_code == 200
     assert calls["n"] == 1  # one upstream synthesis, then served from cache
+
+
+def test_preview_single_flight_under_concurrent_cold_requests():
+    # The cost cap must hold under load: many concurrent cold requests for one persona share a single
+    # synthesis rather than each firing their own.
+    calls = {"n": 0}
+
+    class Slow(StubAudioSource):
+        async def synthesize(self, text: str) -> bytes:
+            calls["n"] += 1
+            await asyncio.sleep(0.05)  # widen the window so requests genuinely overlap
+            return await super().synthesize(text)
+
+    app.dependency_overrides[get_source_factory] = lambda: (lambda v=None: Slow())
+
+    async def hammer():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as ac:
+            return await asyncio.gather(*[ac.get("/voices/aria/preview") for _ in range(5)])
+
+    results = asyncio.run(hammer())
+    assert all(r.status_code == 200 for r in results)
+    assert calls["n"] == 1  # five concurrent cold hits -> one synthesis
 
 
 def test_preview_unknown_persona_is_404():

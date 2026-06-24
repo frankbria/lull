@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Callable
 
@@ -104,9 +105,10 @@ def get_source_factory() -> Callable[[str | None], AudioSource]:
 
 # Each persona's preview (fixed text + fixed voice) is deterministic, so synthesize it at most once
 # and serve from memory after — that caps billable ElevenLabs calls on this ungated endpoint to one
-# per persona, closing the repeat-request cost vector. ponytail: in-process cache; a shared cache or
-# CDN if this ever runs multi-instance.
-_preview_cache: dict[str, tuple[bytes, str]] = {}
+# per persona, closing the repeat-request cost vector. We cache the in-flight *task*, not just the
+# result, so a burst of concurrent cold requests for the same persona share one synthesis instead of
+# each firing their own (single-flight). ponytail: in-process; a shared cache/CDN if multi-instance.
+_preview_cache: dict[str, asyncio.Task[tuple[bytes, str]]] = {}
 
 
 @app.get("/voices/{persona_id}/preview")
@@ -116,16 +118,27 @@ async def voice_preview(
 ) -> Response:
     """A short, fixed sample in the persona's voice (FR-V2). Ungated on purpose: a preview must not
     burn the user's free generation, and the text is server-fixed so it can't be abused for a full
-    render. The first hit per persona synthesizes; the rest are served from cache."""
+    render. The first hit per persona synthesizes; concurrent and later hits share/reuse it."""
     voice_id = resolve_voice_id(persona_id)
     if voice_id is None:
         raise HTTPException(status_code=404, detail="unknown voice persona")
-    cached = _preview_cache.get(persona_id)
-    if cached is None:
-        source = make_source(voice_id)
-        cached = (await _synthesize(source, PREVIEW_TEXT), source.media_type)
-        _preview_cache[persona_id] = cached
-    audio, media_type = cached
+
+    task = _preview_cache.get(persona_id)
+    if task is None:
+        # Store the task BEFORE awaiting so an overlapping request finds and awaits the same one.
+        async def render() -> tuple[bytes, str]:
+            source = make_source(voice_id)
+            return await _synthesize(source, PREVIEW_TEXT), source.media_type
+
+        task = asyncio.ensure_future(render())
+        _preview_cache[persona_id] = task
+
+    try:
+        audio, media_type = await task
+    except Exception:
+        # A failed render must not be cached — drop it so the next request retries.
+        _preview_cache.pop(persona_id, None)
+        raise
     return Response(content=audio, media_type=media_type)
 
 

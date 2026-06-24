@@ -136,4 +136,40 @@ describe("voice change after generation (US-005/FR-V4)", () => {
     fireEvent.press(screen.getByTestId("voice-james"));
     expect(cleanup).toHaveBeenCalled();
   });
+
+  it("discards a render that finishes after the voice changed mid-synthesis", async () => {
+    // Synthesis is in flight when the user changes voice; when it resolves it must NOT start playing
+    // in the now-stale voice — the resolved player is released instead.
+    const cleanup = jest.fn();
+    let resolveSynth: () => void = () => {};
+    synthMock.mockReturnValue(
+      new Promise<() => void>((res) => {
+        resolveSynth = () => res(cleanup);
+      }),
+    );
+    render(
+      <TrackBuilderProvider>
+        <TrackBuilderScreen />
+      </TrackBuilderProvider>,
+    );
+
+    fireEvent.press(screen.getByTestId("generate-script"));
+    await screen.findByTestId("script-text");
+    fireEvent.scroll(screen.getByTestId("script-scroll"), {
+      nativeEvent: {
+        contentOffset: { y: 100 },
+        layoutMeasurement: { height: 100 },
+        contentSize: { height: 200 },
+      },
+    });
+    fireEvent.press(screen.getByTestId("continue-audio")); // synth now pending
+
+    // Change voice while the synth is still pending, then let it resolve.
+    fireEvent.press(screen.getByTestId("back-to-track"));
+    fireEvent.press(screen.getByTestId("voice-james"));
+    await act(async () => {
+      resolveSynth();
+    });
+    expect(cleanup).toHaveBeenCalled(); // stale playback released, not kept
+  });
 });
