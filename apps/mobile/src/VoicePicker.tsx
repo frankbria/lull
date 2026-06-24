@@ -13,7 +13,13 @@ export function VoicePicker() {
   // One preview plays at a time; release the prior player before the next, and on unmount.
   const previewCleanup = useRef<(() => void) | null>(null);
   const previewBusy = useRef(false);
-  useEffect(() => () => previewCleanup.current?.(), []);
+  const mounted = useRef(true);
+  useEffect(() => {
+    return () => {
+      mounted.current = false;
+      previewCleanup.current?.();
+    };
+  }, []);
 
   async function preview(personaId: string) {
     if (previewBusy.current) return; // serialize taps so one can't orphan another's player
@@ -21,7 +27,13 @@ export function VoicePicker() {
     try {
       previewCleanup.current?.();
       previewCleanup.current = null;
-      previewCleanup.current = await playVoicePreview(personaId);
+      const cleanup = await playVoicePreview(personaId);
+      // Unmounted while the request was in flight → release now; the unmount effect already ran.
+      if (!mounted.current) {
+        cleanup();
+        return;
+      }
+      previewCleanup.current = cleanup;
     } finally {
       previewBusy.current = false;
     }

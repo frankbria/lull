@@ -96,6 +96,21 @@ def test_preview_single_flight_under_concurrent_cold_requests():
     assert calls["n"] == 1  # five concurrent cold hits -> one synthesis
 
 
+def test_failed_preview_is_not_cached_so_retry_succeeds():
+    # A failed synthesis must be evicted, not left poisoning the cache until restart.
+    state = {"fail": True}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if state["fail"]:
+            return httpx.Response(500, text="boom")
+        return httpx.Response(200, content=b"OK", headers={"content-type": "audio/mpeg"})
+
+    _factory(handler)
+    assert client.get("/voices/lily/preview").status_code == 502  # upstream 500 -> mapped
+    state["fail"] = False
+    assert client.get("/voices/lily/preview").status_code == 200  # retried, cache wasn't poisoned
+
+
 def test_preview_unknown_persona_is_404():
     _factory(lambda req: httpx.Response(200, content=b"X"))
     r = client.get("/voices/bogus/preview")

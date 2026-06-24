@@ -91,6 +91,27 @@ describe("VoicePicker (US-005)", () => {
     fireEvent.press(screen.getByTestId("preview-sarah"));
     await waitFor(() => expect(previewMock).toHaveBeenCalledWith("sarah"));
   });
+
+  it("releases a preview that resolves after the picker unmounts", async () => {
+    const cleanup = jest.fn();
+    let resolvePreview: () => void = () => {};
+    previewMock.mockReturnValue(
+      new Promise<() => void>((res) => {
+        resolvePreview = () => res(cleanup);
+      }),
+    );
+    const { unmount } = render(
+      <TrackBuilderProvider>
+        <VoicePicker />
+      </TrackBuilderProvider>,
+    );
+    fireEvent.press(screen.getByTestId("preview-sarah")); // request now pending
+    unmount();
+    await act(async () => {
+      resolvePreview();
+    });
+    expect(cleanup).toHaveBeenCalled(); // not left playing after leaving the screen
+  });
 });
 
 // AC3: changing the voice after a track has rendered must trigger a re-render. With no persisted

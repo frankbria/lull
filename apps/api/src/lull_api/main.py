@@ -131,14 +131,20 @@ async def voice_preview(
             return await _synthesize(source, PREVIEW_TEXT), source.media_type
 
         task = asyncio.ensure_future(render())
+
+        # Evict a task that ends in failure OR cancellation, so a poisoned entry never sticks in the
+        # cache until restart. A done-callback covers every exit path, including CancelledError
+        # (a BaseException that a try/except Exception around the await would miss).
+        def _evict_if_unsuccessful(t: asyncio.Task[tuple[bytes, str]]) -> None:
+            if t.cancelled() or t.exception() is not None:
+                _preview_cache.pop(persona_id, None)
+
+        task.add_done_callback(_evict_if_unsuccessful)
         _preview_cache[persona_id] = task
 
-    try:
-        audio, media_type = await task
-    except Exception:
-        # A failed render must not be cached — drop it so the next request retries.
-        _preview_cache.pop(persona_id, None)
-        raise
+    # shield: if THIS request is cancelled (client disconnect), it must not cancel the shared
+    # synthesis that other waiters depend on.
+    audio, media_type = await asyncio.shield(task)
     return Response(content=audio, media_type=media_type)
 
 
