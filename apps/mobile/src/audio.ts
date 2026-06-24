@@ -5,11 +5,15 @@ import { createAudioPlayer } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
 import { apiBase } from "./apiBase";
 
-// Synthesize a script to audio and start playback. Returns a cleanup function the caller runs on
-// unmount/next-run — expo-audio's imperative players don't auto-release, and web Blob URLs leak.
+// Synthesize a script to audio and start playback in the chosen voice (US-005). Returns a cleanup
+// function the caller runs on unmount/next-run — expo-audio's imperative players don't auto-release,
+// and web Blob URLs leak.
 // ponytail: a fresh guest token per call keeps the no-auth dev loop working; real sign-in + a
 // persisted session land with the auth UI. On-device playback hardening is #24.
-export async function synthesizeAndPlay(scriptText: string): Promise<() => void> {
+export async function synthesizeAndPlay(
+  scriptText: string,
+  personaId?: string,
+): Promise<() => void> {
   const base = apiBase();
 
   // Generation is gated; claim a guest token for the one free generation (no auth UI yet).
@@ -20,18 +24,29 @@ export async function synthesizeAndPlay(scriptText: string): Promise<() => void>
   const tres = await fetch(`${base}/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Guest-Token": guest_token },
-    body: JSON.stringify({ text: scriptText }),
+    body: JSON.stringify({ text: scriptText, persona_id: personaId }),
   });
   if (!tres.ok) throw new Error(`/tts ${tres.status}`);
-  // Honor the server's container: stub returns WAV, ElevenLabs returns MP3. Mislabeling the bytes
-  // (e.g. MP3 as .wav) can fail to decode on web/iOS — derive extension + MIME from this.
-  const contentType = tres.headers.get("content-type") ?? "audio/mpeg";
-  const bytes = new Uint8Array(await tres.arrayBuffer());
+  return playResponse(tres, "session");
+}
 
-  const uri = await audioUri(bytes, contentType);
+// Play a persona's short preview clip (US-005/FR-V2). The preview endpoint is ungated, so it costs
+// no free generation — no guest token needed. Returns the same cleanup contract as synthesizeAndPlay.
+export async function playVoicePreview(personaId: string): Promise<() => void> {
+  const tres = await fetch(`${apiBase()}/voices/${personaId}/preview`);
+  if (!tres.ok) throw new Error(`/voices/${personaId}/preview ${tres.status}`);
+  return playResponse(tres, "preview");
+}
+
+// Decode an audio response and start playback, returning the cleanup function. Honor the server's
+// container: stub returns WAV, ElevenLabs returns MP3. Mislabeling the bytes (e.g. MP3 as .wav) can
+// fail to decode on web/iOS — derive extension + MIME from the Content-Type.
+async function playResponse(res: Response, label: string): Promise<() => void> {
+  const contentType = res.headers.get("content-type") ?? "audio/mpeg";
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const uri = await audioUri(bytes, contentType, label);
   const player = createAudioPlayer(uri);
   player.play();
-
   return () => {
     player.remove();
     if (Platform.OS === "web") URL.revokeObjectURL(uri);
@@ -44,14 +59,15 @@ function audioExt(contentType: string): "wav" | "mp3" {
 }
 
 // Web (expo-file-system is native-only): play straight from a Blob URL.
-// Native: write the bytes to the cache as base64 and play the file.
-async function audioUri(bytes: Uint8Array, contentType: string): Promise<string> {
+// Native: write the bytes to the cache as base64 and play the file. `label` keeps the session and
+// preview clips in separate cache files so one can't clobber the other mid-playback.
+async function audioUri(bytes: Uint8Array, contentType: string, label: string): Promise<string> {
   if (Platform.OS === "web") {
     // Uint8Array is a valid BlobPart at runtime; cast past TS 5.9's stricter ArrayBuffer typing.
     const blob = new Blob([bytes as BlobPart], { type: contentType });
     return URL.createObjectURL(blob);
   }
-  const uri = `${FileSystem.cacheDirectory}lull-session.${audioExt(contentType)}`;
+  const uri = `${FileSystem.cacheDirectory}lull-${label}.${audioExt(contentType)}`;
   await FileSystem.writeAsStringAsync(uri, base64FromBytes(bytes), {
     encoding: FileSystem.EncodingType.Base64,
   });

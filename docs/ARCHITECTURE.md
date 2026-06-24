@@ -36,6 +36,11 @@ A single interface fronts all audio so provider/source swaps are **data, not rew
 - Later impls (no client changes): real-time TTS streaming, **owned music beds** (Frank's
   compositions + ElevenLabs Music), and — low priority — third-party streams.
 - Music beds are **tagged data** (mood/context, loop points), not new code paths.
+- **Voice personas (FR-V1):** the client picks a named persona; the raw ElevenLabs voice id is
+  resolved server-side (`personas.py`), so a voice can be re-cast without breaking saved
+  preferences. `GET /voices/{id}/preview` serves a fixed ~25s sample in that voice — ungated (a
+  preview must not burn a free generation) but single-flight cached per persona so the public
+  endpoint can't be turned into a billable amplifier.
 
 ## Data model (initial)
 `User` · `Track` (spec + status) · `TrackComponent` (category, choice, ai_chosen flag) ·

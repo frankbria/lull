@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { DEFAULT_VOICE_ID } from "@lull/shared";
 import { AI_CHOICE, CATEGORIES, type Category, type CategoryId } from "./catalog";
-import { loadHypnosis, saveHypnosis } from "./preferences";
+import { loadHypnosis, loadVoice, saveHypnosis, saveVoice } from "./preferences";
 
 // One selection per category: a concrete option id, or AI_CHOICE meaning "let the AI pick".
 // State lives here, above the screen, so selections survive a screen unmount/remount =
@@ -29,6 +30,9 @@ interface TrackBuilderValue {
   // True Hypnosis (true) vs Plain Meditation (false). Persisted, feeds the generation spec (US-003).
   hypnosis: boolean;
   setHypnosis: (value: boolean) => void;
+  // Selected voice persona id (US-005). Persisted; passed to /tts so audio renders in this voice.
+  voiceId: string;
+  setVoiceId: (value: string) => void;
 }
 
 const TrackBuilderContext = createContext<TrackBuilderValue | null>(null);
@@ -69,9 +73,27 @@ export function TrackBuilderProvider({
     void saveHypnosis(value);
   };
 
+  // Voice persona preference: same load-on-mount/persist-on-change shape as hypnosis (US-005).
+  const [voiceId, setVoiceIdState] = useState(DEFAULT_VOICE_ID);
+  const voiceSetRef = useRef(false);
+  useEffect(() => {
+    let active = true;
+    loadVoice().then((v) => {
+      if (active && v !== null && !voiceSetRef.current) setVoiceIdState(v);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const setVoiceId = (value: string) => {
+    voiceSetRef.current = true;
+    setVoiceIdState(value);
+    void saveVoice(value);
+  };
+
   return (
     <TrackBuilderContext.Provider
-      value={{ selections, aiPicks, select, hypnosis, setHypnosis }}
+      value={{ selections, aiPicks, select, hypnosis, setHypnosis, voiceId, setVoiceId }}
     >
       {children}
     </TrackBuilderContext.Provider>

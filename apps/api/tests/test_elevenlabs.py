@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from lull_api.audio import ElevenLabsAudioSource
-from lull_api.main import app, get_source
+from lull_api.main import app, get_source_factory
 
 # Module client for tests that never reach the generation gate (char-cap, missing-key).
 client = TestClient(app)
@@ -20,7 +20,9 @@ def _source_with(handler) -> ElevenLabsAudioSource:
 
 
 def _override(source) -> None:
-    app.dependency_overrides[get_source] = lambda: source
+    # /tts builds its source via a (voice_id) -> AudioSource factory now; these tests don't vary the
+    # voice, so the factory ignores it and returns the one mock source.
+    app.dependency_overrides[get_source_factory] = lambda: (lambda voice_id=None: source)
 
 
 def _guest(client) -> dict[str, str]:

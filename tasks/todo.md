@@ -1,50 +1,37 @@
-# US-004 — Script preview before audio (scroll ≥50%) — Issue #11
+# US-005 Voice persona selection + preview (issue #12)
 
 ## Acceptance criteria
-- [ ] "Generate" produces script **text first, not audio** (≥16pt, scrollable)
-- [ ] Shows estimated duration
-- [ ] Regenerate script without changing components
-- [ ] Cannot proceed to audio until scrolled ≥50%
+1. ≥6 personas (name + descriptor), abstracted from raw ElevenLabs IDs
+2. 20–30s preview per persona in hypnosis cadence (slow, warm)
+3. Selection saved; changing voice after generation triggers re-render
 
-## Context
-- Pure **mobile** feature. API `POST /script` already returns script text + `est_seconds` (no API change).
-- Single-screen MVP, no router. State in `TrackBuilderContext` (selections + hypnosis).
-- `Sprint0Harness` (__DEV__-only) already proves the script+tts+play path.
+**Out of scope:** FR-V3 warmth/pace controls (not in this issue's AC — YAGNI).
 
-## Scope decision (the one real boundary)
-Generate sends `{ ...DEFAULT_SPEC, hypnosis }` — every component on `"ai"` plus the real
-hypnosis toggle — exactly the contract the API fully supports today (the harness uses it).
-**Wiring the per-component assembled spec into Generate is #13 (Confirm & Generate)**, which
-also grows the API component library + real LLM (#14). Documented in Known Limitations.
-Rationale: keeps US-004 (preview + scroll gate) decoupled from #13 and avoids 500s on catalog
-ids the stub doesn't know. No silent fallbacks added.
+## Design (mirror existing patterns: HypnosisToggle persistence, CategorySection radio, AudioSource seam)
 
-## Plan
-1. **`src/ScriptPreview.tsx`** (new, production component)
-   - "Generate script" → `POST /script` with `{...DEFAULT_SPEC, hypnosis}`; sets script state.
-   - Script in a bounded scrollable area, `fontSize: 18` (≥16pt), readable lineHeight.
-   - Estimated duration from `est_seconds` (formatted `m:ss` / `~N sec`).
-   - "Regenerate" → re-`POST /script`; selections/hypnosis untouched (components unchanged).
-   - "Continue to audio" disabled until scroll progress ≥50%; calls `onProceed` when enabled.
-   - Scroll progress from ScrollView `onScroll` **and** `onContentSizeChange`/`onLayout` so a
-     short script that fits on screen unlocks immediately (≥50% already visible).
-2. **`src/TrackBuilderScreen.tsx`** — add a `phase` ("build" | "preview") `useState` swap
-   (no router — YAGNI). Builder gets a "Generate script" CTA → preview; preview has
-   "← Back to track" (components preserved via context). `onProceed` reuses the audio path.
-3. **Audio handoff** — extract the harness's tts+play into `src/audio.ts`
-   `synthesizeAndPlay(apiBase, scriptText)`; `Sprint0Harness` and ScriptPreview both call it.
-   Keeps "Continue to audio" a real action with no duplicated code.
-4. **`src/__tests__/scriptPreview.test.tsx`** (new, RNTL + mocked `fetch`)
-   - Generate shows script text + duration, and does **not** call `/tts` (script first).
-   - "Continue to audio" disabled initially → enabled after `fireEvent.scroll` past 50%.
-   - Short script (fits, `onContentSizeChange`) → enabled without scrolling.
-   - "Regenerate" re-calls `/script`; selections unchanged.
+Persona abstraction split, matching how the component catalog is already duplicated
+(mobile `catalog.ts` ↔ api `scripts.py`): public {id,name,descriptor} on the client,
+the secret id→ElevenLabs-voice-id map stays server-only. No raw voice IDs reach the client.
+
+### Shared (`packages/shared/src/index.ts`)
+- [ ] Add `VoicePersona {id,name,descriptor}`, `VOICE_PERSONAS` (6 calm/warm personas), `DEFAULT_VOICE_ID`.
+
+### Backend (`apps/api`)
+- [ ] `personas.py`: `PERSONA_VOICE_IDS: dict[id, elevenlabs_voice_id]` (6, real premade IDs) + `resolve_voice_id(persona_id) -> str | None`. Canned ~25s slow/warm `PREVIEW_TEXT`.
+- [ ] `audio.py`: `get_audio_source(settings, voice_id=None)` — optional per-call voice override.
+- [ ] `main.py`:
+  - `TtsIn.persona_id: str | None = None`; `/tts` resolves persona→voice_id (unknown → 422), builds source with override. Backward compatible (None → config default).
+  - `GET /voices/{persona_id}/preview` — **ungated** (preview must not burn the free generation); unknown → 404; synth `PREVIEW_TEXT` with persona voice → audio bytes.
+- [ ] Tests `tests/test_voices.py`: preview 200 (valid, no guest token needed) / 404 (invalid); persona routed into ElevenLabs URL; `/tts` persona_id routes correct voice; unknown persona_id → 422.
+
+### Mobile (`apps/mobile`)
+- [ ] `preferences.ts`: add `VOICE_KEY`, `loadVoice`/`saveVoice` (mirror hypnosis).
+- [ ] `TrackBuilderContext`: `voiceId` (default `DEFAULT_VOICE_ID`) + `setVoiceId`, persisted on change, loaded on mount.
+- [ ] `audio.ts`: `synthesizeAndPlay(text, personaId?)` adds `persona_id` to `/tts`; new `playVoicePreview(personaId)` GETs the preview clip, plays, returns cleanup.
+- [ ] `VoicePicker.tsx`: radio list over `VOICE_PERSONAS` (mirror HypnosisToggle), per-row "Preview" button → `playVoicePreview`.
+- [ ] `TrackBuilderScreen`: render `<VoicePicker/>`; thread `voiceId` into `proceedToAudio`; release current audio when `voiceId` changes (AC3 re-render — no persisted track yet, so re-render = drop stale audio → next play uses new voice).
+- [ ] Tests `voicePicker.test.tsx`: renders ≥6 personas, default selected, selection persists, preview triggers playback; persona threaded into `/tts`; voice change releases prior audio.
 
 ## Verify
-- `cd apps/mobile && npm run test && npm run lint && npm run typecheck`
-- Demo (Showboat) every AC with outcome evidence.
-
-## Out of scope (separate issues)
-- Per-component assembled spec into Generate — **#13**
-- Real LLM script generation — **#14**
-- On-device audio playback hardening — **#24**
+- [ ] `cd apps/api && uv run pytest -q` + `cd apps/mobile && pnpm exec jest` green
+- [ ] Demo each AC (Phase 11)

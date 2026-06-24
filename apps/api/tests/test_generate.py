@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from lull_api.audio import StubAudioSource
-from lull_api.main import app, get_source
+from lull_api.main import app, get_source_factory
 
 client = TestClient(app)
 
@@ -30,7 +30,7 @@ def test_script_rejects_unknown_component():
 
 def test_tts_stub_returns_playable_wav(client):
     """client fixture = transactional DB; a server-issued guest token claims the free generation."""
-    app.dependency_overrides[get_source] = lambda: StubAudioSource()
+    app.dependency_overrides[get_source_factory] = lambda: (lambda v=None: StubAudioSource())
     try:
         guest_token = client.post("/auth/guest").json()["guest_token"]
         r = client.post(
@@ -42,7 +42,7 @@ def test_tts_stub_returns_playable_wav(client):
         assert r.headers["content-type"] == "audio/wav"
         assert r.content[:4] == b"RIFF"  # valid WAV header
     finally:
-        app.dependency_overrides.pop(get_source, None)
+        app.dependency_overrides.pop(get_source_factory, None)
 
 
 def test_meditation_vs_hypnosis_opener_differs():

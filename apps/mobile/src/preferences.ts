@@ -1,7 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { VOICE_PERSONAS } from "@lull/shared";
 
-// Persisted user preferences. One key for now (US-003); add more here as they appear.
+// Persisted user preferences. Add more keys here as they appear.
 export const HYPNOSIS_KEY = "lull.pref.hypnosis";
+export const VOICE_KEY = "lull.pref.voice"; // selected voice persona id (US-005)
 
 // Reads the saved hypnosis-vs-meditation preference, or null if none is stored yet. Error-safe:
 // a missing, unreadable, or corrupt value returns null so the caller keeps its own default. The
@@ -24,5 +26,26 @@ export async function saveHypnosis(value: boolean): Promise<void> {
     await AsyncStorage.setItem(HYPNOSIS_KEY, JSON.stringify(value));
   } catch {
     // ponytail: best-effort persistence; the toggle still works in-session if the write fails.
+  }
+}
+
+// Selected voice persona id (US-005). null if none stored yet; the default lives at the call site
+// (DEFAULT_VOICE_ID in the context), not duplicated here. Error-safe like the hypnosis pair.
+export async function loadVoice(): Promise<string | null> {
+  try {
+    const raw = await AsyncStorage.getItem(VOICE_KEY);
+    // Drop a stored id that no longer maps to a persona (removed/renamed) so the caller falls back
+    // to its default rather than sending an unknown persona that /tts would reject with 422.
+    return VOICE_PERSONAS.some((p) => p.id === raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveVoice(personaId: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(VOICE_KEY, personaId);
+  } catch {
+    // ponytail: best-effort; the picker still works in-session if the write fails.
   }
 }
