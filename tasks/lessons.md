@@ -135,3 +135,20 @@ A web/RNTL demo + cross-family review caught three things unit tests alone misse
   `@lull/shared`, secret `id→voice_id` map server-only — same pattern as the component catalog
   (mobile `catalog.ts` ↔ api `scripts.py`). `loadVoice` drops a stored id no longer in the catalog
   so a removed persona falls back to the default instead of 422-ing `/tts`.
+
+## Credit/cache boundaries (from #15 / US-008)
+- **Reserve→work→refund must guard EVERY exit path, including `asyncio.CancelledError`.** The guest
+  free generation is reserved+committed before the (slow) render, so any later failure must refund
+  it. `except Exception` is not enough: `CancelledError` (client disconnect mid-render) is a
+  *BaseException* and slips past it — add an explicit `except asyncio.CancelledError` that refunds.
+  Same reason `_preview_cache` evicts via a done-callback. Wrap the whole render/persist/commit span
+  in one guard; a mapped synth error keeps its HTTP status, `OSError`→503, anything else refunds and
+  re-raises unmasked.
+- **A global on-disk cache needs per-test isolation or tests flake.** Once `/tts` always writes a
+  content-addressed file to `audio_store/`, tests that assert "synthesis ran" get false cache hits
+  from earlier tests. Fix with an autouse conftest fixture pointing `settings.audio_store_dir` at a
+  fresh `tmp_path` per test — never the repo default.
+- **Dedup cache key must hash the EFFECTIVE render inputs, not the request's raw ones.** Keying on
+  `voice_id` (None for the default-voice path) serves stale audio after the configured default
+  changes; key on the resolved voice + the audio source. Persist component metadata from the
+  server-side resolution of the spec, never client-supplied values (which can contradict the spec).
