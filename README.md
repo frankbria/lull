@@ -17,7 +17,7 @@ Discovery complete. See [`docs/PRD.md`](docs/PRD.md) for the full product requir
 ## Repo layout
 ```
 apps/
-  api/        FastAPI backend — script assembly + ElevenLabs TTS via the AudioSource seam (runnable, tested)
+  api/        FastAPI backend — LLM script generation (hardened prompt + moderation) + ElevenLabs TTS via the ScriptSource/AudioSource seams (runnable, tested)
   mobile/     Expo / React Native app — track builder (component selection) + Sprint-0 test harness
 packages/
   shared/     TypeScript contract types shared by client + API
@@ -35,11 +35,12 @@ Staging/prod: set `LULL_DATABASE_URL` to the managed/VPS Postgres DSN (overrides
 **API** (no key needed — runs on the stub AudioSource):
 ```bash
 cd apps/api && uv sync
-uv run pytest -q                                   # 20 passing (needs the Postgres above)
+uv run pytest -q                                   # needs the Postgres above
 uv run uvicorn lull_api.main:app --reload          # http://localhost:8000  (/health, /script, /tts)
 ```
-Real ElevenLabs round-trip: copy `apps/api/.env.example` → `.env`, set `LULL_AUDIO_SOURCE=elevenlabs`
-and `LULL_ELEVENLABS_API_KEY`.
+Real round-trips: copy `apps/api/.env.example` → `.env`. For TTS set `LULL_AUDIO_SOURCE=elevenlabs`
++ `LULL_ELEVENLABS_API_KEY`. For LLM script generation set `LULL_SCRIPT_SOURCE=claude`
++ `LULL_ANTHROPIC_API_KEY` (defaults stay on the offline stubs — no keys needed).
 
 **Mobile** (Expo SDK 54; deps reconciled via the workspace install):
 ```bash

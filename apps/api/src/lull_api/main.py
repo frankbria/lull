@@ -7,7 +7,7 @@ from typing import Callable
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .audio import AudioSource, AudioSourceError, get_audio_source
@@ -21,8 +21,16 @@ from .entitlements import (
     reserve_guest_generation,
 )
 from .models import User
+from .moderation import ScriptModerationError, moderate
 from .personas import PREVIEW_TEXT, resolve_voice_id
-from .scripts import TrackSpec, build_script
+from .pii import strip_pii
+from .scripts import (
+    ScriptSource,
+    ScriptSourceError,
+    TrackSpec,
+    build_script_source,
+    resolve_components,
+)
 from .security import decode_guest_token
 
 app = FastAPI(title="Lull API", version="0.1.0")
@@ -45,6 +53,9 @@ class TrackSpecIn(BaseModel):
     body: str = "ai"
     ending: str = "ai"
     hypnosis: bool = True
+    # Untrusted suggestion theme (FR-G4); PII-stripped + delimited before the LLM. Capped here so an
+    # oversized theme can't bloat the upstream prompt (the char cap elsewhere is output-only).
+    theme: str = Field(default="", max_length=500)
 
 
 class ScriptOut(BaseModel):
@@ -65,13 +76,46 @@ def health() -> dict[str, str]:
     return {"status": "ok", "audio_source": settings.audio_source}
 
 
-@app.post("/script", response_model=ScriptOut)
-def generate_script(spec_in: TrackSpecIn) -> ScriptOut:
-    """Script first, audio later (FR-G1): returns text to preview + a cost/time estimate."""
+def get_script_source() -> ScriptSource:
+    """The configured script generator (stub offline, Claude in prod). A config error (claude with no
+    key) surfaces as a 503, matching the audio path. Overridable in tests."""
     try:
-        script, components = build_script(TrackSpec(**spec_in.model_dump()))
+        return build_script_source(settings)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503, detail={"message": str(exc), "retryable": False}
+        ) from exc
+
+
+@app.post("/script", response_model=ScriptOut)
+async def generate_script(
+    spec_in: TrackSpecIn,
+    source: ScriptSource = Depends(get_script_source),
+) -> ScriptOut:
+    """Script first, audio later (FR-G1): returns text to preview + a cost/time estimate.
+
+    Pipeline (PRD §): resolve AI picks -> generate -> moderate BEFORE TTS (FR-G5). A moderation block
+    returns a safe 422 so prohibited content is never voiced.
+    """
+    spec = TrackSpec(**spec_in.model_dump())
+    try:
+        components = resolve_components(spec)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        script = await source.generate(spec, components)
+    except ScriptSourceError as exc:
+        raise HTTPException(
+            status_code=exc.status_code, detail={"message": exc.message, "retryable": exc.retryable}
+        ) from exc
+
+    try:
+        moderate(script)
+    except ScriptModerationError as exc:
+        raise HTTPException(
+            status_code=422, detail={"message": exc.message, "blocked": exc.category}
+        )
 
     chars = len(script)
     if chars > settings.max_script_chars:
@@ -168,6 +212,19 @@ async def tts(
     if len(body.text) > settings.max_script_chars:
         raise HTTPException(status_code=422, detail="text exceeds max_script_chars")
 
+    # Strip PII before the text leaves us for the voice service (AC3: stripped from LLM/TTS calls).
+    text = strip_pii(body.text)
+
+    # Defense in depth (FR-G5): /script is the primary moderation gate (with theme context), but a
+    # client could POST harmful text straight to /tts. Re-check the finalized text before any billable
+    # synth. No theme context here, so this fails closed — a bare med name is blocked too.
+    try:
+        moderate(text)
+    except ScriptModerationError as exc:
+        raise HTTPException(
+            status_code=422, detail={"message": exc.message, "blocked": exc.category}
+        )
+
     # Resolve the chosen persona to a voice (US-005); reject an unknown one before any gating/charge.
     voice_id: str | None = None
     if body.persona_id is not None:
@@ -200,7 +257,7 @@ async def tts(
         db.commit()  # commit the reservation before the (slow, billable) synth
 
     try:
-        audio = await _synthesize(source, body.text)
+        audio = await _synthesize(source, text)
     except HTTPException:
         if guest_id is not None:
             release_guest_generation(db, guest_id)  # render failed → don't burn the free credit

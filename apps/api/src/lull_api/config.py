@@ -31,6 +31,14 @@ class Settings(BaseSettings):
         "EXAVITQu4vr4xnSDxMaL"  # ElevenLabs "Sarah" default; swap per persona
     )
 
+    # Script generation. "stub" assembles the deterministic seed-library template so the app runs
+    # offline with no API key; "claude" calls Anthropic with the hardened prompt (issue #14).
+    script_source: str = "stub"
+    anthropic_api_key: str | None = None
+    # Per-generation call — opus is the default; set LULL_ANTHROPIC_MODEL=claude-sonnet-4-6 for a
+    # cheaper run if quality allows.
+    anthropic_model: str = "claude-opus-4-8"
+
     # Hard cap (FR-G6). ~ one 90-min hypnosis script is well under this.
     max_script_chars: int = 60_000
 
