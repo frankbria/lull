@@ -38,6 +38,9 @@ def store_audio(audio: bytes, checksum: str, ext: str, store_dir: str) -> str:
     the same dir then os.replace into place, so a concurrent /tts that sees cache_path.exists() never
     reads a half-written file. Idempotent — concurrent misses for the same render write identical
     bytes, so the final replace is a harmless last-write-wins."""
+    # ponytail: the store grows unbounded — no TTL/LRU eviction or size quota here. Write volume is
+    # bounded by the edge IP rate-limit that already caps guest-token rotation (see auth.py); a TTL/
+    # LRU sweep + disk quota is the upgrade when the volume warrants it (tracked follow-up).
     # Resolve to absolute so the path persisted in the DB is portable: a later cache-hit's
     # Path(path).exists() check must not depend on the server's CWD at request time.
     directory = Path(store_dir).resolve()
