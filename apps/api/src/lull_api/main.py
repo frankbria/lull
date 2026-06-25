@@ -275,18 +275,29 @@ async def tts(
     #
     # The cache is the content-addressed file on disk (global, so it spares TTS spend for everyone
     # including guests — not only persisted authed tracks).
+    audio: bytes | None = None
+    audio_path: str
     if cache_path.exists():
-        audio = cache_path.read_bytes()
-        audio_path: str = str(cache_path)
-    else:
+        try:
+            audio = cache_path.read_bytes()
+            audio_path = str(cache_path)
+        except OSError:
+            audio = None  # unreadable cache file → treat as a miss and re-synthesize below
+    if audio is None:
+        # Any failure rendering OR storing the audio must release a guest's reserved generation: a
+        # request that returns no audio must never burn the one free credit.
         try:
             audio = await _synthesize(source, text)
+            audio_path = store_audio(audio, checksum, ext, settings.audio_store_dir)
         except HTTPException:
-            if guest_id is not None:
-                release_guest_generation(db, guest_id)  # render failed → don't burn the free credit
-                db.commit()
+            _release_guest_on_failure(db, guest_id)
             raise
-        audio_path = store_audio(audio, checksum, ext, settings.audio_store_dir)
+        except OSError as exc:
+            _release_guest_on_failure(db, guest_id)
+            raise HTTPException(
+                status_code=503,
+                detail={"message": "could not store audio — please try again", "retryable": True},
+            ) from exc
 
     # Persist an account-scoped track with its metadata (US-008 AC1/AC2). Authed only: a guest has
     # no user row. Needs the originating spec; without it the call is a bare render (no Track).
@@ -310,6 +321,14 @@ async def tts(
         db.commit()
 
     return Response(content=audio, media_type=source.media_type)
+
+
+def _release_guest_on_failure(db: Session, guest_id: uuid.UUID | None) -> None:
+    """Give back a guest's reserved free generation when the render/store failed, so a request that
+    returns no audio never burns the one free credit. No-op for authenticated users."""
+    if guest_id is not None:
+        release_guest_generation(db, guest_id)
+        db.commit()
 
 
 async def _synthesize(source: AudioSource, text: str) -> bytes:

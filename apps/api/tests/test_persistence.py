@@ -157,6 +157,31 @@ def test_guest_render_populates_global_cache_for_later_authed(client, db, counti
     assert db.scalar(select(Track)) is not None  # ...and the authed user still gets a saved track
 
 
+def test_guest_credit_released_when_audio_store_fails(client, db, counting_source, monkeypatch):
+    """A render that can't be stored must release the guest's reserved generation — a request that
+    returns no audio must never burn the one free credit."""
+    from lull_api import main as main_mod
+    from lull_api.models import GuestCredit
+    from lull_api.security import decode_guest_token
+
+    def _boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(main_mod, "store_audio", _boom)
+
+    guest_token = client.post("/auth/guest").json()["guest_token"]
+    r = client.post(
+        "/tts",
+        json={"text": "rest now, you are safe", "persona_id": "aria"},
+        headers={"X-Guest-Token": guest_token},
+    )
+    assert r.status_code == 503
+    credit = db.scalar(
+        select(GuestCredit).where(GuestCredit.guest_id == decode_guest_token(guest_token))
+    )
+    assert credit is not None and credit.used == 0  # reservation released, free credit intact
+
+
 def test_different_voice_is_not_cache_served(client, db, counting_source):
     token = _auth_token(client)
     _tts(client, token, persona="aria")
