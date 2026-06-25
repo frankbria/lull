@@ -13,20 +13,26 @@ import { apiBase } from "./apiBase";
 export async function synthesizeAndPlay(
   scriptText: string,
   personaId?: string,
+  // US-006: report pipeline progress so the Confirm & Generate modal can show script → voice → finalize.
+  onProgress?: (stage: "script" | "voice" | "finalize") => void,
 ): Promise<() => void> {
   const base = apiBase();
 
   // Generation is gated; claim a guest token for the one free generation (no auth UI yet).
+  onProgress?.("script");
   const gres = await fetch(`${base}/auth/guest`, { method: "POST" });
   if (!gres.ok) throw new Error(`/auth/guest ${gres.status}`);
   const { guest_token } = await gres.json();
 
+  onProgress?.("voice");
   const tres = await fetch(`${base}/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Guest-Token": guest_token },
     body: JSON.stringify({ text: scriptText, persona_id: personaId }),
   });
   if (!tres.ok) throw new Error(`/tts ${tres.status}`);
+
+  onProgress?.("finalize");
   return playResponse(tres, "session");
 }
 

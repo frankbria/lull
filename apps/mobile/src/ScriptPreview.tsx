@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { DEFAULT_SPEC, type ScriptResponse } from "@lull/shared";
 import { apiBase } from "./apiBase";
+import { ConfirmGenerateModal } from "./ConfirmGenerateModal";
 import { useTrackBuilder } from "./TrackBuilderContext";
 
 // US-004: read the script before any audio is produced. Generating returns the script *text* first
@@ -10,7 +11,10 @@ import { useTrackBuilder } from "./TrackBuilderContext";
 // today. Wiring the builder's per-component picks into the spec is #13 (Confirm & Generate).
 interface Props {
   onBack: () => void;
-  onProceed: (scriptText: string) => void | Promise<void>;
+  onProceed: (
+    scriptText: string,
+    onProgress?: (stage: "script" | "voice" | "finalize") => void,
+  ) => void | Promise<void>;
 }
 
 export function ScriptPreview({ onBack, onProceed }: Props) {
@@ -18,6 +22,9 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
   const [result, setResult] = useState<ScriptResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // US-006: "Continue to audio" opens the cost/time estimate modal; the explicit "Confirm and
+  // Generate" tap inside it is what actually starts synthesis.
+  const [confirming, setConfirming] = useState(false);
   // The scroll gate: false until the user has read ≥50% of the script. Reset on every (re)generate.
   const [unlocked, setUnlocked] = useState(false);
   // Bumped per generation; keys the ScrollView so a regenerated script remounts and fires fresh
@@ -129,19 +136,22 @@ export function ScriptPreview({ onBack, onProceed }: Props) {
               accessibilityRole="button"
               accessibilityState={{ disabled: !unlocked }}
               disabled={!unlocked}
-              // onProceed (audio synthesis + playback) can reject on network/audio failure; surface
-              // it like the generate path instead of leaking an unhandled rejection.
-              onPress={() => {
-                setError(null);
-                Promise.resolve(onProceed(result.script)).catch((e) =>
-                  setError(e instanceof Error ? e.message : String(e)),
-                );
-              }}
+              // Opens the estimate modal; synthesis only starts on the modal's "Confirm and Generate".
+              onPress={() => setConfirming(true)}
               style={[styles.button, styles.primary, !unlocked && styles.buttonDisabled]}
             >
               <Text style={styles.primaryText}>Continue to audio</Text>
             </Pressable>
           </View>
+
+          {confirming && (
+            <ConfirmGenerateModal
+              report={result}
+              onClose={() => setConfirming(false)}
+              // The modal owns generation status/errors; surface progress to its stage display.
+              onGenerate={(onProgress) => Promise.resolve(onProceed(result.script, onProgress))}
+            />
+          )}
         </>
       )}
     </View>

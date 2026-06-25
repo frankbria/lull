@@ -81,8 +81,14 @@ describe("ScriptPreview (US-004)", () => {
     scrollTo(400, 300, 1000); // 400/700 ≈ 0.57 ≥ 0.5 → unlocked
     const after = screen.getByTestId("continue-audio");
     expect(after.props.accessibilityState.disabled).toBe(false);
+
+    // US-006: "Continue to audio" now opens the estimate modal — it does NOT synthesize directly.
     fireEvent.press(after);
-    expect(onProceed).toHaveBeenCalledWith(SCRIPT_RESPONSE.script);
+    expect(onProceed).not.toHaveBeenCalled();
+    fireEvent.press(await screen.findByTestId("confirm-generate"));
+    await waitFor(() =>
+      expect(onProceed).toHaveBeenCalledWith(SCRIPT_RESPONSE.script, expect.any(Function)),
+    );
   });
 
   it("does not trap the user when the script fits without scrolling", async () => {
@@ -93,13 +99,15 @@ describe("ScriptPreview (US-004)", () => {
     expect(screen.getByTestId("continue-audio").props.accessibilityState.disabled).toBe(false);
   });
 
-  it("surfaces an error instead of leaking an unhandled rejection when audio fails", async () => {
+  it("surfaces an audio failure inside the confirm modal (with retry)", async () => {
     const onProceed = jest.fn().mockRejectedValue(new Error("tts 502"));
     renderPreview({ onProceed });
     await screen.findByTestId("continue-audio");
     scrollTo(400, 300, 1000); // unlock
     fireEvent.press(screen.getByTestId("continue-audio"));
-    expect(await screen.findByTestId("preview-error")).toHaveTextContent(/tts 502/);
+    fireEvent.press(await screen.findByTestId("confirm-generate"));
+    expect(await screen.findByTestId("generate-error")).toHaveTextContent(/tts 502/);
+    expect(screen.getByTestId("retry-generate")).toBeTruthy();
   });
 
   it("regenerates the script without changing components, re-gating the scroll", async () => {

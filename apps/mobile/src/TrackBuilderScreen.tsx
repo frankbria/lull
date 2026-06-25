@@ -36,14 +36,17 @@ export function TrackBuilderScreen() {
     audioCleanup.current = null;
   }, [voiceId]);
 
-  async function proceedToAudio(scriptText: string) {
+  async function proceedToAudio(
+    scriptText: string,
+    onProgress?: (stage: "script" | "voice" | "finalize") => void,
+  ) {
     if (audioBusy.current) return; // a synth/play run is already in flight
     audioBusy.current = true;
     const token = playToken.current;
     try {
       audioCleanup.current?.(); // release any prior player before starting a new one
       audioCleanup.current = null;
-      const cleanup = await synthesizeAndPlay(scriptText, voiceId);
+      const cleanup = await synthesizeAndPlay(scriptText, voiceId, onProgress);
       // Voice changed while we were synthesizing → this playback is in the old voice; discard it.
       if (token !== playToken.current) {
         cleanup();
