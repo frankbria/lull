@@ -117,7 +117,7 @@ describe("VoicePicker (US-005)", () => {
 // AC3: changing the voice after a track has rendered must trigger a re-render. With no persisted
 // track, that means the stale audio is released so the next play re-synthesizes in the new voice.
 describe("voice change after generation (US-005/FR-V4)", () => {
-  const SCRIPT = { script: "Rest now.\n\n".repeat(20).trim(), est_seconds: 130 };
+  const SCRIPT = { script: "Rest now.\n\n".repeat(20).trim(), char_count: 220, est_seconds: 130, est_cost_usd: 0.02 };
   const originalFetch = global.fetch;
   beforeEach(() => {
     global.fetch = jest
@@ -147,10 +147,12 @@ describe("voice change after generation (US-005/FR-V4)", () => {
         contentSize: { height: 200 },
       },
     });
+    // US-006: continue-audio opens the estimate modal; "Confirm and Generate" starts synthesis.
+    fireEvent.press(screen.getByTestId("continue-audio"));
     await act(async () => {
-      fireEvent.press(screen.getByTestId("continue-audio"));
+      fireEvent.press(screen.getByTestId("confirm-generate"));
     });
-    expect(synthMock).toHaveBeenCalledWith(SCRIPT.script, DEFAULT_VOICE_ID);
+    expect(synthMock).toHaveBeenCalledWith(SCRIPT.script, DEFAULT_VOICE_ID, expect.any(Function));
 
     // Back to build, change the voice -> the rendered audio is released (re-render).
     fireEvent.press(screen.getByTestId("back-to-track"));
@@ -183,7 +185,8 @@ describe("voice change after generation (US-005/FR-V4)", () => {
         contentSize: { height: 200 },
       },
     });
-    fireEvent.press(screen.getByTestId("continue-audio")); // synth now pending
+    fireEvent.press(screen.getByTestId("continue-audio")); // opens the estimate modal
+    fireEvent.press(screen.getByTestId("confirm-generate")); // synth now pending
 
     // Change voice while the synth is still pending, then let it resolve.
     fireEvent.press(screen.getByTestId("back-to-track"));
