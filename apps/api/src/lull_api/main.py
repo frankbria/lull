@@ -342,6 +342,12 @@ async def tts(
                 "retryable": True,
             },
         ) from exc
+    except asyncio.CancelledError:
+        # A client disconnect mid-render cancels this request. CancelledError is a BaseException, so
+        # `except Exception` below would miss it — refund explicitly so a disconnect never burns the
+        # free generation. The shared single-flight render is shielded, so it survives for others.
+        _release_guest_on_failure(db, guest_id)
+        raise
     except Exception:
         _release_guest_on_failure(
             db, guest_id

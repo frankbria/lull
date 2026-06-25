@@ -231,6 +231,34 @@ def test_different_voice_is_not_cache_served(client, db, counting_source):
     assert counting_source["n"] == 2
 
 
+def test_guest_credit_released_on_client_disconnect(client, db, counting_source, monkeypatch):
+    """A client disconnect mid-render raises asyncio.CancelledError (a BaseException); it must still
+    refund the guest's reserved generation — a disconnect must never burn the one free credit."""
+    from lull_api import main as main_mod
+    from lull_api.models import GuestCredit
+    from lull_api.security import decode_guest_token
+
+    async def _cancelled(*a, **k):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(main_mod, "_render_single_flight", _cancelled)
+
+    guest_token = client.post("/auth/guest").json()["guest_token"]
+    try:
+        client.post(
+            "/tts",
+            json={"text": "rest now, you are safe", "persona_id": "aria"},
+            headers={"X-Guest-Token": guest_token},
+        )
+    except BaseException:
+        pass  # the request is cancelled; we only assert the credit was refunded
+
+    credit = db.scalar(
+        select(GuestCredit).where(GuestCredit.guest_id == decode_guest_token(guest_token))
+    )
+    assert credit is not None and credit.used == 0
+
+
 def test_single_flight_collapses_concurrent_identical_renders(tmp_path, monkeypatch):
     """Two concurrent identical cache misses must share one synthesis (no duplicate TTS spend) and
     write the file once — the audio-store dir is isolated by the autouse fixture."""
