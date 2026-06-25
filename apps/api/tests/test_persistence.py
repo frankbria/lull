@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -228,3 +229,28 @@ def test_different_voice_is_not_cache_served(client, db, counting_source):
     _tts(client, token, persona="aria")
     _tts(client, token, persona="james")  # same text, different voice => different audio
     assert counting_source["n"] == 2
+
+
+def test_single_flight_collapses_concurrent_identical_renders(tmp_path, monkeypatch):
+    """Two concurrent identical cache misses must share one synthesis (no duplicate TTS spend) and
+    write the file once — the audio-store dir is isolated by the autouse fixture."""
+    from lull_api import main as main_mod
+
+    calls = {"n": 0}
+
+    class _Slow(StubAudioSource):
+        async def synthesize(self, text: str) -> bytes:
+            calls["n"] += 1
+            await asyncio.sleep(0.02)  # widen the race window so both requests are in-flight
+            return await super().synthesize(text)
+
+    async def run_both():
+        source = _Slow()
+        return await asyncio.gather(
+            main_mod._render_single_flight("checksum-x", source, "hello", "wav"),
+            main_mod._render_single_flight("checksum-x", source, "hello", "wav"),
+        )
+
+    a, b = asyncio.run(run_both())
+    assert calls["n"] == 1  # one synth despite two concurrent misses
+    assert a == b  # both requests got the same audio

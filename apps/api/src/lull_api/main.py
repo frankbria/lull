@@ -306,8 +306,8 @@ async def tts(
             except OSError:
                 audio = None  # unreadable cache file → treat as a miss and re-synthesize below
         if audio is None:
-            audio = await _synthesize(source, text)
-            audio_path = store_audio(audio, checksum, ext, settings.audio_store_dir)
+            audio = await _render_single_flight(checksum, source, text, ext)
+            audio_path = str(cache_path)
 
         # Persist an account-scoped track with its metadata (US-008 AC1/AC2). Authed only: a guest
         # has no user row. Needs the originating spec; without it the call is a bare render.
@@ -357,6 +357,34 @@ def _release_guest_on_failure(db: Session, guest_id: uuid.UUID | None) -> None:
     if guest_id is not None:
         release_guest_generation(db, guest_id)
         db.commit()
+
+
+# Single-flight the synth-on-miss so concurrent identical renders don't each fire a billable TTS
+# call: the first stores the in-flight task under its checksum, overlapping requests await the same
+# one, and the file is written exactly once (mirrors _preview_cache). ponytail: in-process, so it
+# collapses duplicates within one worker — the right scope for the single-instance deploy; a
+# cross-process render reservation (e.g. a Postgres advisory lock) is the multi-instance upgrade.
+_render_inflight: dict[str, asyncio.Task[bytes]] = {}
+
+
+async def _render_single_flight(checksum: str, source: AudioSource, text: str, ext: str) -> bytes:
+    task = _render_inflight.get(checksum)
+    if task is None:
+
+        async def render() -> bytes:
+            audio = await _synthesize(source, text)
+            store_audio(audio, checksum, ext, settings.audio_store_dir)
+            return audio
+
+        task = asyncio.ensure_future(render())
+        # Evict on every exit (success, error, cancel) so a failed render never sticks as a poisoned
+        # entry — the next request retries from scratch.
+        task.add_done_callback(lambda t: _render_inflight.pop(checksum, None))
+        _render_inflight[checksum] = task
+
+    # shield: a client disconnect cancelling THIS request must not cancel the shared render others
+    # are awaiting.
+    return await asyncio.shield(task)
 
 
 async def _synthesize(source: AudioSource, text: str) -> bytes:
