@@ -32,6 +32,8 @@ export function ConfirmGenerateModal({ report, onClose, onGenerate }: Props) {
   const [stage, setStage] = useState<Stage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Duplicate submits are prevented synchronously: the confirm/retry button is removed below while
+  // status === "generating", so onGenerate can't be re-entered for a second in-flight request.
   const run = async () => {
     setStatus("generating");
     setStage(null);
@@ -69,6 +71,9 @@ export function ConfirmGenerateModal({ report, onClose, onGenerate }: Props) {
             </Text>
             <Text testID="est-gen-time" style={styles.row}>
               ~{formatDuration(estimateGenerationSeconds(report.char_count))} to generate
+            </Text>
+            <Text testID="est-cost" style={styles.row}>
+              ~${report.est_cost_usd.toFixed(2)} estimated cost
             </Text>
           </View>
 

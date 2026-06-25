@@ -117,7 +117,7 @@ describe("VoicePicker (US-005)", () => {
 // AC3: changing the voice after a track has rendered must trigger a re-render. With no persisted
 // track, that means the stale audio is released so the next play re-synthesizes in the new voice.
 describe("voice change after generation (US-005/FR-V4)", () => {
-  const SCRIPT = { script: "Rest now.\n\n".repeat(20).trim(), char_count: 220, est_seconds: 130 };
+  const SCRIPT = { script: "Rest now.\n\n".repeat(20).trim(), char_count: 220, est_seconds: 130, est_cost_usd: 0.02 };
   const originalFetch = global.fetch;
   beforeEach(() => {
     global.fetch = jest

@@ -25,6 +25,7 @@ describe("ConfirmGenerateModal (US-006)", () => {
     expect(screen.getByTestId("est-length")).toHaveTextContent(/2:10/);
     // Whatever the heuristic, it must render a non-empty estimate.
     expect(screen.getByTestId("est-gen-time")).toHaveTextContent(/\d/);
+    expect(screen.getByTestId("est-cost")).toHaveTextContent(/\$0\.02/);
   });
 
   it("requires an explicit 'Confirm and Generate' tap before generating", async () => {
