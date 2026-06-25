@@ -38,7 +38,10 @@ _MEDICATIONS = (
 # dosage rule catch "take two Xanax" (dosing a NAMED med is never allowed, even one the user named —
 # the user exemption only excuses *mentioning* a med, never *dosing* it).
 _COUNT = r"(?:\d+|a|one|two|three|four|five|six|several|some|another|a\s+few)"
-_MED_ALT = "|".join(re.escape(m) for m in _MEDICATIONS)
+_UNIT = r"(?:mg|mcg|ml|milligrams?|micrograms?|milliliters?)"
+# Class terms pluralize ("SSRIs", "benzodiazepines"); brand names don't, so only these need aliases.
+_MED_TERMS = _MEDICATIONS + ("ssris", "benzodiazepines")
+_MED_ALT = "|".join(re.escape(m) for m in _MED_TERMS)
 
 # category -> patterns. First matching category wins; the category name is surfaced to the caller.
 _RULES: dict[str, tuple[re.Pattern[str], ...]] = {
@@ -54,7 +57,7 @@ _RULES: dict[str, tuple[re.Pattern[str], ...]] = {
     # Dosage instructions: a number (digit or spelled out) adjacent to a medical unit, a dose noun,
     # or a named medication.
     "dosage": (
-        re.compile(r"\b\d+\s?(mg|mcg|ml|milligrams?|micrograms?|milliliters?)\b"),
+        re.compile(rf"\b{_COUNT}\s?{_UNIT}\b"),
         re.compile(rf"\btake\s+{_COUNT}\s+(pills?|tablets?|capsules?|doses?|drops?)\b"),
         # "take <med>" with or without a count/article — instructing to take a med is never allowed.
         re.compile(rf"\btake\s+(?:{_COUNT}\s+|your\s+)?(?:{_MED_ALT})\b"),
@@ -126,6 +129,6 @@ def moderate(script: str) -> None:
             if pattern.search(lowered):
                 raise ScriptModerationError(category)
 
-    for med in _MEDICATIONS:
+    for med in _MED_TERMS:
         if re.search(rf"\b{re.escape(med)}\b", lowered):
             raise ScriptModerationError("named_medication")
