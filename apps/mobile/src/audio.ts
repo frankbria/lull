@@ -46,14 +46,22 @@ export async function synthesizeAndPlay(
   return playResponse(tres, `track-${key}`);
 }
 
-// Content hash of (voice, script) → the device-cache file name. ponytail: djb2 string hash, a cache
-// key not a security digest; a collision (astronomically unlikely for this corpus) would just replay
-// a near-identical clip. Exported for a focused unit test.
+// Content hash of (voice, script) → the device-cache file name. Two independent rolling hashes
+// (djb2 + sdbm) concatenated to a 64-bit hex key, so collisions are negligible for a device's render
+// history. ponytail: a cache key, not a security digest, and it does NOT encode the backend audio
+// source — switching LULL_AUDIO_SOURCE locally can replay a stale clip until the app cache clears
+// (the source is fixed per deployment, so this only bites a dev mid-switch). Exported for a unit test.
 export function trackCacheKey(scriptText: string, personaId?: string): string {
   const s = `${personaId ?? ""}|${scriptText}`;
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(16);
+  let h1 = 5381; // djb2
+  let h2 = 0; // sdbm
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = ((h1 << 5) + h1 + c) | 0;
+    h2 = (c + (h2 << 6) + (h2 << 16) - h2) | 0;
+  }
+  const hex = (n: number) => (n >>> 0).toString(16).padStart(8, "0");
+  return hex(h1) + hex(h2);
 }
 
 // Native: a prior render of this exact (script, voice) lives at lull-track-{key}.{ext} in the file

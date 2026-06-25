@@ -32,6 +32,7 @@ from .scripts import (
     TrackSpec,
     build_script_source,
     resolve_components,
+    validate_components,
 )
 from .security import decode_guest_token
 
@@ -247,6 +248,17 @@ async def tts(
     checksum = script_checksum(text, voice_id, settings.audio_source)
     cache_path = Path(settings.audio_store_dir).resolve() / f"{checksum}.{ext}"
 
+    # If this render is to be persisted (authed + spec), validate the component metadata BEFORE any
+    # billable synth, so bad input is a clean 422 (never a 500 after we've already paid for TTS) and
+    # we never store guessed/partial components. The client sends the exact map /script resolved.
+    if user is not None and body.spec is not None:
+        if body.components is None:
+            raise HTTPException(status_code=422, detail="components required to persist a track")
+        try:
+            validate_components(body.components)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     guest_id: uuid.UUID | None = None
     if user is not None:
         if not has_access(db, user.id, "generation"):
@@ -302,12 +314,11 @@ async def tts(
     # Persist an account-scoped track with its metadata (US-008 AC1/AC2). Authed only: a guest has
     # no user row. Needs the originating spec; without it the call is a bare render (no Track).
     if user is not None and body.spec is not None:
-        spec_dict = body.spec.model_dump()
         persist_track(
             db,
             user_id=user.id,
-            spec=spec_dict,
-            components=body.components or resolve_components(TrackSpec(**spec_dict)),
+            spec=body.spec.model_dump(),
+            components=body.components,  # validated above — a complete, known-option map
             persona_id=body.persona_id,
             audio_path=audio_path,
             checksum=checksum,

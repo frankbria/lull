@@ -157,6 +157,36 @@ def test_guest_render_populates_global_cache_for_later_authed(client, db, counti
     assert db.scalar(select(Track)) is not None  # ...and the authed user still gets a saved track
 
 
+def test_persist_rejects_missing_or_invalid_components_before_synth(client, db, counting_source):
+    """A persist request (authed + spec) with absent/partial/unknown components is a clean 422 before
+    any billable synth — never a 500 after paying for TTS, and never a guessed TrackComponent row."""
+    token = _auth_token(client)
+
+    # spec but no components → 422, nothing synthesized or saved
+    r = client.post(
+        "/tts",
+        json={"text": "rest now", "persona_id": "aria", "spec": SPEC},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 422
+    assert counting_source["n"] == 0
+    assert db.scalar(select(Track)) is None
+
+    # partial / unknown-option components → 422
+    bad = client.post(
+        "/tts",
+        json={
+            "text": "rest now",
+            "persona_id": "aria",
+            "spec": SPEC,
+            "components": {"induction": "not_a_real_option"},
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert bad.status_code == 422
+    assert counting_source["n"] == 0
+
+
 def test_guest_credit_released_when_audio_store_fails(client, db, counting_source, monkeypatch):
     """A render that can't be stored must release the guest's reserved generation — a request that
     returns no audio must never burn the one free credit."""

@@ -96,6 +96,17 @@ class ScriptSource(Protocol):
     async def generate(self, spec: TrackSpec, resolved: dict[str, str]) -> str: ...
 
 
+def validate_components(components: dict[str, str]) -> None:
+    """Validate a resolved component map for persistence: exactly the four categories, each a known
+    option (never 'ai'). Raises ValueError otherwise — so a track is never stored from partial,
+    extra, or guessed component metadata."""
+    if set(components) != set(_CATEGORY_ORDER):
+        raise ValueError("components must cover exactly: " + ", ".join(_CATEGORY_ORDER))
+    for category, choice in components.items():
+        if choice not in COMPONENTS[category]:
+            raise ValueError(f"unknown {category} option: {choice!r}")
+
+
 def resolve_components(spec: TrackSpec) -> dict[str, str]:
     """Resolve every category to a concrete choice ('ai' picks the first option), so the AI's actual
     picks can be revealed in the preview (FR-B3). Raises ValueError on an unknown option."""

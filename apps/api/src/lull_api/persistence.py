@@ -8,6 +8,8 @@ A generated render is saved account-scoped (Track + TrackComponent rows) with it
 from __future__ import annotations
 
 import hashlib
+import os
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -32,15 +34,23 @@ def script_checksum(text: str, voice_id: str | None, source: str) -> str:
 
 
 def store_audio(audio: bytes, checksum: str, ext: str, store_dir: str) -> str:
-    """Write the bytes under {checksum}.{ext} and return the path. Idempotent: concurrent cache
-    misses for the same render write identical bytes to the same name, so last-write-wins is safe.
-    """
+    """Write the bytes under {checksum}.{ext} and return the path. Atomic: write to a temp file in
+    the same dir then os.replace into place, so a concurrent /tts that sees cache_path.exists() never
+    reads a half-written file. Idempotent — concurrent misses for the same render write identical
+    bytes, so the final replace is a harmless last-write-wins."""
     # Resolve to absolute so the path persisted in the DB is portable: a later cache-hit's
     # Path(path).exists() check must not depend on the server's CWD at request time.
     directory = Path(store_dir).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{checksum}.{ext}"
-    path.write_bytes(audio)
+    fd, tmp_name = tempfile.mkstemp(dir=directory, suffix=f".{ext}.tmp")
+    try:
+        with os.fdopen(fd, "wb") as tmp:
+            tmp.write(audio)
+        os.replace(tmp_name, path)  # atomic on the same filesystem
+    except OSError:
+        Path(tmp_name).unlink(missing_ok=True)  # don't leave a stray temp file on failure
+        raise
     return str(path)
 
 
