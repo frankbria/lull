@@ -157,34 +157,45 @@ def test_guest_render_populates_global_cache_for_later_authed(client, db, counti
     assert db.scalar(select(Track)) is not None  # ...and the authed user still gets a saved track
 
 
-def test_persist_rejects_missing_or_invalid_components_before_synth(client, db, counting_source):
-    """A persist request (authed + spec) with absent/partial/unknown components is a clean 422 before
-    any billable synth — never a 500 after paying for TTS, and never a guessed TrackComponent row."""
+def test_persist_components_are_server_resolved_from_spec(client, db, counting_source):
+    """Components are resolved from the spec server-side (the canonical /script resolution), so the
+    client need not send them; an unknown spec option, or client components that contradict the spec,
+    is a clean 422 before any billable synth — never a 500 after paying, never a contradictory row."""
     token = _auth_token(client)
 
-    # spec but no components → 422, nothing synthesized or saved
+    # No client components → still persists, using the server-resolved map.
     r = client.post(
         "/tts",
-        json={"text": "rest now", "persona_id": "aria", "spec": SPEC},
+        json={"text": "rest now, you are safe", "persona_id": "aria", "spec": SPEC},
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert r.status_code == 422
-    assert counting_source["n"] == 0
-    assert db.scalar(select(Track)) is None
+    assert r.status_code == 200
+    track = db.scalar(select(Track))
+    comps = db.scalars(select(TrackComponent).where(TrackComponent.track_id == track.id)).all()
+    assert {c.category for c in comps} == {"induction", "deepener", "body", "ending"}
 
-    # partial / unknown-option components → 422
-    bad = client.post(
+    # Unknown spec option → 422 before synth (counter stays where it was after the success above).
+    n_after_success = counting_source["n"]
+    bad_spec = client.post(
+        "/tts",
+        json={"text": "x", "persona_id": "aria", "spec": {**SPEC, "induction": "not_real"}},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert bad_spec.status_code == 422
+
+    # Client components that contradict the spec → 422.
+    contradictory = client.post(
         "/tts",
         json={
-            "text": "rest now",
+            "text": "y",
             "persona_id": "aria",
             "spec": SPEC,
-            "components": {"induction": "not_a_real_option"},
+            "components": {**COMPONENTS, "induction": "fixation"},
         },
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert bad.status_code == 422
-    assert counting_source["n"] == 0
+    assert contradictory.status_code == 422
+    assert counting_source["n"] == n_after_success  # neither rejected request synthesized
 
 
 def test_guest_credit_released_when_audio_store_fails(client, db, counting_source, monkeypatch):

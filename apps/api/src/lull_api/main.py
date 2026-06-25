@@ -32,7 +32,6 @@ from .scripts import (
     TrackSpec,
     build_script_source,
     resolve_components,
-    validate_components,
 )
 from .security import decode_guest_token
 
@@ -245,19 +244,25 @@ async def tts(
     # below instead of re-billing TTS (US-008 AC3). The source is part of the key so a stub WAV never
     # gets served in place of real ElevenLabs output after a config change.
     ext = _ext_for_media_type(source.media_type)
-    checksum = script_checksum(text, voice_id, settings.audio_source)
+    # Key on the EFFECTIVE render voice, not the raw persona: the non-persona path renders with the
+    # configured default voice (settings.elevenlabs_voice_id, mirrored from get_audio_source), so the
+    # key must change if that default changes — otherwise a config swap serves audio in the old voice.
+    effective_voice = voice_id if voice_id is not None else settings.elevenlabs_voice_id
+    checksum = script_checksum(text, effective_voice, settings.audio_source)
     cache_path = Path(settings.audio_store_dir).resolve() / f"{checksum}.{ext}"
 
-    # If this render is to be persisted (authed + spec), validate the component metadata BEFORE any
-    # billable synth, so bad input is a clean 422 (never a 500 after we've already paid for TTS) and
-    # we never store guessed/partial components. The client sends the exact map /script resolved.
+    # If this render will be persisted (authed + spec), resolve + validate the component metadata
+    # server-side BEFORE any billable synth: a bad spec option, or client components that contradict
+    # the spec, is a clean 422 (never a 500 after we've paid for TTS). The stored map is the canonical
+    # server resolution (what /script returns), never a client-supplied or guessed value.
+    persisted_components: dict[str, str] | None = None
     if user is not None and body.spec is not None:
-        if body.components is None:
-            raise HTTPException(status_code=422, detail="components required to persist a track")
         try:
-            validate_components(body.components)
+            persisted_components = resolve_components(TrackSpec(**body.spec.model_dump()))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if body.components is not None and body.components != persisted_components:
+            raise HTTPException(status_code=422, detail="components do not match spec")
 
     guest_id: uuid.UUID | None = None
     if user is not None:
@@ -318,7 +323,7 @@ async def tts(
             db,
             user_id=user.id,
             spec=body.spec.model_dump(),
-            components=body.components,  # validated above — a complete, known-option map
+            components=persisted_components,  # server-resolved + validated above
             persona_id=body.persona_id,
             audio_path=audio_path,
             checksum=checksum,
