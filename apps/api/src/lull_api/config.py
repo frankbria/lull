@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # Rough ElevenLabs cost estimate, USD per 1k characters (tune against real billing).
     cost_per_1k_chars_usd: float = 0.15
 
+    # Where synthesized audio is written + dedup-cached on disk (US-008). Files are named
+    # {checksum}.{ext}, so an identical (script, voice) render reuses one file instead of re-billing
+    # TTS. ponytail: local FS now; object storage / CDN when multi-instance.
+    audio_store_dir: str = "audio_store"
+
     # Session JWT (HS256). Dev default is fine locally; MUST be overridden in staging/prod via
     # LULL_JWT_SECRET. ponytail: a shared secret + expiry, not a key-rotation service.
     jwt_secret: str = _DEFAULT_JWT_SECRET

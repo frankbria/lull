@@ -17,6 +17,15 @@ export async function synthesizeAndPlay(
   onProgress?: (stage: "script" | "voice" | "finalize") => void,
 ): Promise<() => void> {
   const base = apiBase();
+  const key = trackCacheKey(scriptText, personaId);
+
+  // US-008 local device cache: an identical earlier render is replayed from the device file cache,
+  // skipping the (billable) /tts round trip entirely.
+  const cached = await cachedTrackUri(key);
+  if (cached) {
+    onProgress?.("finalize");
+    return playUri(cached);
+  }
 
   // Generation is gated; claim a guest token for the one free generation (no auth UI yet).
   onProgress?.("script");
@@ -33,7 +42,44 @@ export async function synthesizeAndPlay(
   if (!tres.ok) throw new Error(`/tts ${tres.status}`);
 
   onProgress?.("finalize");
-  return playResponse(tres, "session");
+  // Write under the content-keyed name so the next identical render hits cachedTrackUri above.
+  return playResponse(tres, `track-${key}`);
+}
+
+// Content hash of (voice, script) → the device-cache file name. Two independent rolling hashes
+// (djb2 + sdbm) concatenated to a 64-bit hex key, so collisions are negligible for a device's render
+// history. ponytail: a cache key, not a security digest, and it does NOT encode the backend audio
+// source — switching LULL_AUDIO_SOURCE locally can replay a stale clip until the app cache clears
+// (the source is fixed per deployment, so this only bites a dev mid-switch). Exported for a unit test.
+export function trackCacheKey(scriptText: string, personaId?: string): string {
+  const s = `${personaId ?? ""}|${scriptText}`;
+  let h1 = 5381; // djb2
+  let h2 = 0; // sdbm
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = ((h1 << 5) + h1 + c) | 0;
+    h2 = (c + (h2 << 6) + (h2 << 16) - h2) | 0;
+  }
+  const hex = (n: number) => (n >>> 0).toString(16).padStart(8, "0");
+  return hex(h1) + hex(h2);
+}
+
+// Native: a prior render of this exact (script, voice) lives at lull-track-{key}.{ext} in the file
+// cache. Web has no file cache (expo-file-system is native-only), so it always re-fetches.
+async function cachedTrackUri(key: string): Promise<string | null> {
+  if (Platform.OS === "web" || !FileSystem.cacheDirectory) return null;
+  // Best-effort: the cache is an optimization, so a filesystem hiccup must fall back to synthesis,
+  // never abort the generation.
+  try {
+    for (const ext of ["mp3", "wav"] as const) {
+      const uri = `${FileSystem.cacheDirectory}lull-track-${key}.${ext}`;
+      const info = await FileSystem.getInfoAsync(uri);
+      if (info.exists) return uri;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 // Play a persona's short preview clip (US-005/FR-V2). The preview endpoint is ungated, so it costs
@@ -51,6 +97,12 @@ async function playResponse(res: Response, label: string): Promise<() => void> {
   const contentType = res.headers.get("content-type") ?? "audio/mpeg";
   const bytes = new Uint8Array(await res.arrayBuffer());
   const uri = await audioUri(bytes, contentType, label);
+  return playUri(uri);
+}
+
+// Start playback from a ready URI (a fresh blob/file write, or a device-cache hit) and return the
+// cleanup contract. Native file URIs persist for the cache; only web Blob URLs are revoked.
+function playUri(uri: string): () => void {
   const player = createAudioPlayer(uri);
   player.play();
   return () => {

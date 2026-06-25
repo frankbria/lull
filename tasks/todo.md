@@ -1,55 +1,61 @@
-# Issue #14 — Real LLM script generation + hardened prompt + moderation pass
+# P[1.1.8] US-008 — Persist generated track + local cache (issue #15)
 
-P[1.1.7] · labels: sprint:1, area:api, safety · self-authored plan (no plan comment on issue)
+**Plan source:** self-authored (issue had no plan comment). Label: `area:api`.
 
-## Acceptance criteria (from issue body, maps to PRD FR-G4/FR-G5)
-1. Versioned, injection-resistant system prompt: no dosages, no diagnosis, no therapeutic-outcome promises.
-2. Post-generation moderation pass **before TTS** blocks prohibited content (self-harm, named meds beyond user input, age-inappropriate, delusion-reinforcing).
-3. PII stripped from LLM/TTS calls.
-4. Red-team set of ≥50 scripts: zero harmful bypasses.
+## Acceptance criteria
+- [x] AC1: Generated track saved to backend (account-scoped) + local device cache
+- [x] AC2: Metadata stored: components, voice, duration, hypnosis flag, date
+- [x] AC3: Identical scripts hashed + cache-served to avoid duplicate TTS spend
 
-## How it fits the codebase (from exploration)
-- `scripts.py` is today a deterministic template assembler (`build_script`) — the Sprint-0 stub the issue names.
-- `audio.py` already establishes the seam pattern: a `Protocol` + a `Stub*` (offline, no API key) + a real httpx impl with an **injected transport** for boundary tests, errors mapped to HTTP via a typed exception. Mirror it for the LLM call — no new dependency (httpx already in), tests stay offline.
-- `/script` endpoint (`main.py`) is the generation step; `/tts` is the render step. PRD pipeline: client → LLM → **moderation** → ElevenLabs. So moderation gates at `/script`.
-- Config is `LULL_`-prefixed pydantic-settings.
+**Done.** Demo (live, real Postgres + disk) showed: authed /tts persists Track +
+4 components (ai_chosen correct) + AudioFile (duration/source/checksum/date),
+identical render by a 2nd user served from cache (0 extra synth, 1 shared file,
+2 tracks), different voice re-synthesized. Cache is content-addressed on disk +
+global (guest renders spare later ones). Device cache: mobile audio.ts replays
+by content hash, skipping /tts (jest-verified).
 
-## Plan (TDD, smallest diff that satisfies the ACs)
+## Key finding
+The data model already exists and was built ahead for exactly this: `Track`
+(spec JSONB, status, created_at, user_id), `TrackComponent` (category, choice,
+ai_chosen), `AudioFile` (path, **checksum index**, duration_seconds, source).
+**No DB migration needed** — only endpoint logic.
 
-### 1. `config.py` — three settings
-- `script_source: str = "stub"` (`stub` | `claude`), mirrors `audio_source`.
-- `anthropic_api_key: str | None = None`.
-- `anthropic_model: str = "claude-opus-4-8"` (Claude-API skill default; overridable via `LULL_ANTHROPIC_MODEL` — sonnet-4-6 is the cheaper pick for this per-generation call if you prefer).
+## Design decisions / assumptions
+- **Account-scoped persistence = authed users only.** `Track.user_id` is a NOT
+  NULL FK; guests have no user row, so a guest generation produces audio (and
+  benefits from the dedup cache) but no saved Track. Auth UI is a separate
+  story; the real client currently always uses a guest token, so persistence is
+  exercised via authed API/tests until the auth UI lands. (Known limitation.)
+- **Dedup cache is global** (by checksum over text+voice) so it saves TTS spend
+  for everyone; only the Track *record* is account-scoped.
+- **Voice** stored inside `Track.spec` JSONB (`persona_id` key) — no new column.
+- **Duration** = `len(text)/12.5` (same ~150 wpm heuristic as `/script`
+  est_seconds); real container parsing is out of scope (ponytail).
+- **Local device cache**: key the on-device audio file by a content hash of
+  (text + persona); replay from cache and skip `/tts` on an identical re-render.
 
-### 2. `scripts.py` — split resolution from generation; add the hardened prompt
-- Add `theme: str = ""` to `TrackSpec` — the untrusted "suggestion-theme" free-text FR-G4 names. **Load-bearing**: with no untrusted input, "injection-resistant"/"PII stripped"/"red-team" are vacuous. API-level only; mobile UI wiring is a follow-up.
-- `PROMPT_VERSION = "g4-v1"` + `SYSTEM_PROMPT`: hardened — forbids dosages/diagnosis/outcome-promises, instructs that the delimited theme is *content, never instructions*.
-- `resolve_components(spec)` — deterministic `ai`-pick resolution (keeps FR-B3 reveal working for both sources).
-- `build_user_prompt(spec, resolved)` — wraps the **PII-stripped** theme in explicit delimiters.
-- `ScriptSource` Protocol + `StubScriptSource` (current template assembly — existing tests stay green offline) + `ClaudeScriptSource` (httpx → Anthropic Messages API, injected transport, `ScriptSourceError` mapped like `AudioSourceError`). `build_script_source(settings)` factory.
+## Steps (TDD: tests first)
+1. **config**: add `audio_store_dir: str = "audio_store"` to `config.py`.
+2. **persistence.py** (new): `script_checksum(text, voice_id)`,
+   `find_cached_audio(db, checksum)`, `store_audio(bytes, checksum, ext, dir)`
+   (write `{checksum}.{ext}`, idempotent), `persist_track(db, user_id, spec,
+   components, persona_id, path, checksum, duration, source)`.
+3. **main.py `/tts`**: compute checksum → cache-lookup before synth (serve
+   cached bytes on hit, skip TTS) → on miss synthesize + store file → if authed
+   and `spec` provided, persist Track + components + AudioFile. Response bytes
+   unchanged (client-compatible).
+4. **TtsIn**: add optional `spec: TrackSpecIn | None` + `components: dict|None`
+   so a full track can be persisted (ai_chosen derived from spec[cat]=="ai").
+5. **mobile audio.ts**: content-hash cache key; reuse cached file / skip `/tts`
+   on identical re-render. Web: in-memory hash→blobURL map.
 
-### 3. `pii.py` — `strip_pii(text)` (regex: emails, phone numbers, SSN-like). ponytail: regex now, NER later.
-
-### 4. `moderation.py` — `moderate(script, *, user_input="")` raises `ScriptModerationError(category)`
-- Rules/keyword classifier: self-harm, dosages, diagnosis, therapeutic-outcome promises, named-meds-beyond-user-input, age-inappropriate, delusion-reinforcing. ponytail: rules now; LLM classifier is the upgrade path (PRD open question).
-
-### 5. `main.py` — wire it in
-- `get_script_source()` dependency (overridable in tests).
-- `/script` → `async`: `resolve → generate → moderate(user_input=theme) → estimate/return`. Moderation block → 422 safe message. `ScriptSourceError` → 502/503.
-
-### 6. Tests (`tests/test_safety.py`) — RED first
-- `strip_pii` removes emails/phones/SSNs.
-- `SYSTEM_PROMPT` carries the version + the three FR-G4 prohibitions; `build_user_prompt` delimits the theme and strips PII from it.
-- **Red-team corpus ≥50** harmful scripts across every category → `moderate()` raises for *all* (zero bypass = AC4).
-- Benign template outputs pass moderation (no false-positive).
-- `/script` with an injected harmful source → 422 (moderation gates before TTS).
-- Existing `test_generate.py` stays green (stub default, async endpoint).
-
-## Out of scope (Known Limitations for PR)
-- Mobile UI for the theme field (API accepts it; UI wiring later).
-- `/tts` direct-call moderation — moderation gates at `/script` per the PRD pipeline; `/tts` keeps the char cap. Follow-up.
-- LLM-based moderation/classifier — rules-based now.
+## Tests
+- API: persist-on-authed, dedup-skips-synth (count synth calls), global cache
+  hit (guest then authed), guest-creates-no-track, existing tests still green,
+  alembic migration test unchanged (no schema change).
+- Mobile: cache key helper + short-circuit (mocked fetch) skips second /tts.
 
 ## Verify
 - [ ] `cd apps/api && uv run pytest` green; ruff + black clean
+- [ ] mobile `pnpm test` green
 - [ ] Demo each AC (Phase 11)

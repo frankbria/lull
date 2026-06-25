@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from pathlib import Path
 from typing import Callable
 
 import jwt
@@ -23,6 +24,7 @@ from .entitlements import (
 from .models import User
 from .moderation import ScriptModerationError, moderate
 from .personas import PREVIEW_TEXT, resolve_voice_id
+from .persistence import persist_track, script_checksum, store_audio
 from .pii import strip_pii
 from .scripts import (
     ScriptSource,
@@ -69,6 +71,11 @@ class ScriptOut(BaseModel):
 class TtsIn(BaseModel):
     text: str
     persona_id: str | None = None  # US-005: which voice to render; None => configured default
+    # US-008: when an authenticated client sends the originating spec (+ resolved components), the
+    # render is persisted as an account-scoped Track with metadata. Optional, so guests and legacy
+    # callers still just get audio back.
+    spec: TrackSpecIn | None = None
+    components: dict[str, str] | None = None
 
 
 @app.get("/health")
@@ -233,6 +240,29 @@ async def tts(
             raise HTTPException(status_code=422, detail="unknown voice persona")
     # Build the source before the gate so a config error (missing key) is a clear 503, as before.
     source = make_source(voice_id)
+    # Dedup key over the exact (text, voice, source): an identical earlier render is served from disk
+    # below instead of re-billing TTS (US-008 AC3). The source is part of the key so a stub WAV never
+    # gets served in place of real ElevenLabs output after a config change.
+    ext = _ext_for_media_type(source.media_type)
+    # Key on the EFFECTIVE render voice, not the raw persona: the non-persona path renders with the
+    # configured default voice (settings.elevenlabs_voice_id, mirrored from get_audio_source), so the
+    # key must change if that default changes — otherwise a config swap serves audio in the old voice.
+    effective_voice = voice_id if voice_id is not None else settings.elevenlabs_voice_id
+    checksum = script_checksum(text, effective_voice, settings.audio_source)
+    cache_path = Path(settings.audio_store_dir).resolve() / f"{checksum}.{ext}"
+
+    # If this render will be persisted (authed + spec), resolve + validate the component metadata
+    # server-side BEFORE any billable synth: a bad spec option, or client components that contradict
+    # the spec, is a clean 422 (never a 500 after we've paid for TTS). The stored map is the canonical
+    # server resolution (what /script returns), never a client-supplied or guessed value.
+    persisted_components: dict[str, str] | None = None
+    if user is not None and body.spec is not None:
+        try:
+            persisted_components = resolve_components(TrackSpec(**body.spec.model_dump()))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if body.components is not None and body.components != persisted_components:
+            raise HTTPException(status_code=422, detail="components do not match spec")
 
     guest_id: uuid.UUID | None = None
     if user is not None:
@@ -256,20 +286,111 @@ async def tts(
             )
         db.commit()  # commit the reservation before the (slow, billable) synth
 
+    # The gate above is per generation request: a guest's one free generation is consumed even on a
+    # cache hit below (they still get a rendered track). The cache saves *our* TTS spend, not the
+    # user's allowance — and charging it closes a free-replay loophole.
+    #
+    # The reservation is already committed, so EVERY failure from here on must refund the guest's
+    # free generation — a request that returns no audio must never burn the one free credit. One
+    # guard around the whole render/persist/commit path covers cache read, synth, store, persist,
+    # and the credit commit uniformly (it's a no-op for authenticated users, who hold no reservation).
     try:
-        audio = await _synthesize(source, text)
-    except HTTPException:
-        if guest_id is not None:
-            release_guest_generation(db, guest_id)  # render failed → don't burn the free credit
+        # The cache is the content-addressed file on disk (global, so it spares TTS spend for
+        # everyone including guests — not only persisted authed tracks).
+        audio: bytes | None = None
+        audio_path: str
+        if cache_path.exists():
+            try:
+                audio = cache_path.read_bytes()
+                audio_path = str(cache_path)
+            except OSError:
+                audio = None  # unreadable cache file → treat as a miss and re-synthesize below
+        if audio is None:
+            audio = await _render_single_flight(checksum, source, text, ext)
+            audio_path = str(cache_path)
+
+        # Persist an account-scoped track with its metadata (US-008 AC1/AC2). Authed only: a guest
+        # has no user row. Needs the originating spec; without it the call is a bare render.
+        if user is not None and body.spec is not None:
+            persist_track(
+                db,
+                user_id=user.id,
+                spec=body.spec.model_dump(),
+                components=persisted_components,  # server-resolved + validated above
+                persona_id=body.persona_id,
+                audio_path=audio_path,
+                checksum=checksum,
+                duration_seconds=len(text) / 12.5,  # ~150 wpm pacing; matches /script est_seconds
+                source=settings.audio_source,
+            )
+
+        # Authed credit counts successful generations only (free/non-blocking at launch).
+        if user is not None:
+            record_generation(db, user.id)
             db.commit()
+    except HTTPException:
+        _release_guest_on_failure(
+            db, guest_id
+        )  # e.g. a mapped synth error — refund, keep its status
+        raise
+    except OSError as exc:
+        _release_guest_on_failure(db, guest_id)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "could not complete generation — please try again",
+                "retryable": True,
+            },
+        ) from exc
+    except asyncio.CancelledError:
+        # A client disconnect mid-render cancels this request. CancelledError is a BaseException, so
+        # `except Exception` below would miss it — refund explicitly so a disconnect never burns the
+        # free generation. The shared single-flight render is shielded, so it survives for others.
+        _release_guest_on_failure(db, guest_id)
+        raise
+    except Exception:
+        _release_guest_on_failure(
+            db, guest_id
+        )  # refund, but surface the real error (don't mask it)
         raise
 
-    # Authed credit counts successful generations only (free/non-blocking at launch).
-    if user is not None:
-        record_generation(db, user.id)
+    return Response(content=audio, media_type=source.media_type)
+
+
+def _release_guest_on_failure(db: Session, guest_id: uuid.UUID | None) -> None:
+    """Give back a guest's reserved free generation when the render/store failed, so a request that
+    returns no audio never burns the one free credit. No-op for authenticated users."""
+    if guest_id is not None:
+        release_guest_generation(db, guest_id)
         db.commit()
 
-    return Response(content=audio, media_type=source.media_type)
+
+# Single-flight the synth-on-miss so concurrent identical renders don't each fire a billable TTS
+# call: the first stores the in-flight task under its checksum, overlapping requests await the same
+# one, and the file is written exactly once (mirrors _preview_cache). ponytail: in-process, so it
+# collapses duplicates within one worker — the right scope for the single-instance deploy; a
+# cross-process render reservation (e.g. a Postgres advisory lock) is the multi-instance upgrade.
+_render_inflight: dict[str, asyncio.Task[bytes]] = {}
+
+
+async def _render_single_flight(checksum: str, source: AudioSource, text: str, ext: str) -> bytes:
+    task = _render_inflight.get(checksum)
+    if task is None:
+
+        async def render() -> bytes:
+            audio = await _synthesize(source, text)
+            store_audio(audio, checksum, ext, settings.audio_store_dir)
+            return audio
+
+        task = asyncio.ensure_future(render())
+        # Evict on every exit (success, error, cancel) so a failed render never sticks as a poisoned
+        # entry — the next request retries from scratch.
+        task.add_done_callback(lambda t: _render_inflight.pop(checksum, None))
+        _render_inflight[checksum] = task
+
+    # shield: a client disconnect cancelling THIS request must not cancel the shared render others
+    # are awaiting.
+    return await asyncio.shield(task)
 
 
 async def _synthesize(source: AudioSource, text: str) -> bytes:
@@ -280,3 +401,7 @@ async def _synthesize(source: AudioSource, text: str) -> bytes:
             status_code=exc.status_code,
             detail={"message": exc.message, "retryable": exc.retryable},
         ) from exc
+
+
+def _ext_for_media_type(media_type: str) -> str:
+    return "wav" if "wav" in media_type else "mp3"
