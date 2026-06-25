@@ -290,51 +290,63 @@ async def tts(
     # cache hit below (they still get a rendered track). The cache saves *our* TTS spend, not the
     # user's allowance — and charging it closes a free-replay loophole.
     #
-    # The cache is the content-addressed file on disk (global, so it spares TTS spend for everyone
-    # including guests — not only persisted authed tracks).
-    audio: bytes | None = None
-    audio_path: str
-    if cache_path.exists():
-        try:
-            audio = cache_path.read_bytes()
-            audio_path = str(cache_path)
-        except OSError:
-            audio = None  # unreadable cache file → treat as a miss and re-synthesize below
-    if audio is None:
-        # Any failure rendering OR storing the audio must release a guest's reserved generation: a
-        # request that returns no audio must never burn the one free credit.
-        try:
+    # The reservation is already committed, so EVERY failure from here on must refund the guest's
+    # free generation — a request that returns no audio must never burn the one free credit. One
+    # guard around the whole render/persist/commit path covers cache read, synth, store, persist,
+    # and the credit commit uniformly (it's a no-op for authenticated users, who hold no reservation).
+    try:
+        # The cache is the content-addressed file on disk (global, so it spares TTS spend for
+        # everyone including guests — not only persisted authed tracks).
+        audio: bytes | None = None
+        audio_path: str
+        if cache_path.exists():
+            try:
+                audio = cache_path.read_bytes()
+                audio_path = str(cache_path)
+            except OSError:
+                audio = None  # unreadable cache file → treat as a miss and re-synthesize below
+        if audio is None:
             audio = await _synthesize(source, text)
             audio_path = store_audio(audio, checksum, ext, settings.audio_store_dir)
-        except HTTPException:
-            _release_guest_on_failure(db, guest_id)
-            raise
-        except OSError as exc:
-            _release_guest_on_failure(db, guest_id)
-            raise HTTPException(
-                status_code=503,
-                detail={"message": "could not store audio — please try again", "retryable": True},
-            ) from exc
 
-    # Persist an account-scoped track with its metadata (US-008 AC1/AC2). Authed only: a guest has
-    # no user row. Needs the originating spec; without it the call is a bare render (no Track).
-    if user is not None and body.spec is not None:
-        persist_track(
-            db,
-            user_id=user.id,
-            spec=body.spec.model_dump(),
-            components=persisted_components,  # server-resolved + validated above
-            persona_id=body.persona_id,
-            audio_path=audio_path,
-            checksum=checksum,
-            duration_seconds=len(text) / 12.5,  # ~150 wpm pacing; matches /script est_seconds
-            source=settings.audio_source,
-        )
+        # Persist an account-scoped track with its metadata (US-008 AC1/AC2). Authed only: a guest
+        # has no user row. Needs the originating spec; without it the call is a bare render.
+        if user is not None and body.spec is not None:
+            persist_track(
+                db,
+                user_id=user.id,
+                spec=body.spec.model_dump(),
+                components=persisted_components,  # server-resolved + validated above
+                persona_id=body.persona_id,
+                audio_path=audio_path,
+                checksum=checksum,
+                duration_seconds=len(text) / 12.5,  # ~150 wpm pacing; matches /script est_seconds
+                source=settings.audio_source,
+            )
 
-    # Authed credit counts successful generations only (free/non-blocking at launch).
-    if user is not None:
-        record_generation(db, user.id)
-        db.commit()
+        # Authed credit counts successful generations only (free/non-blocking at launch).
+        if user is not None:
+            record_generation(db, user.id)
+            db.commit()
+    except HTTPException:
+        _release_guest_on_failure(
+            db, guest_id
+        )  # e.g. a mapped synth error — refund, keep its status
+        raise
+    except OSError as exc:
+        _release_guest_on_failure(db, guest_id)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "could not complete generation — please try again",
+                "retryable": True,
+            },
+        ) from exc
+    except Exception:
+        _release_guest_on_failure(
+            db, guest_id
+        )  # refund, but surface the real error (don't mask it)
+        raise
 
     return Response(content=audio, media_type=source.media_type)
 

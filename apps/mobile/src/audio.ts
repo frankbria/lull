@@ -67,11 +67,17 @@ export function trackCacheKey(scriptText: string, personaId?: string): string {
 // Native: a prior render of this exact (script, voice) lives at lull-track-{key}.{ext} in the file
 // cache. Web has no file cache (expo-file-system is native-only), so it always re-fetches.
 async function cachedTrackUri(key: string): Promise<string | null> {
-  if (Platform.OS === "web") return null;
-  for (const ext of ["mp3", "wav"] as const) {
-    const uri = `${FileSystem.cacheDirectory}lull-track-${key}.${ext}`;
-    const info = await FileSystem.getInfoAsync(uri);
-    if (info.exists) return uri;
+  if (Platform.OS === "web" || !FileSystem.cacheDirectory) return null;
+  // Best-effort: the cache is an optimization, so a filesystem hiccup must fall back to synthesis,
+  // never abort the generation.
+  try {
+    for (const ext of ["mp3", "wav"] as const) {
+      const uri = `${FileSystem.cacheDirectory}lull-track-${key}.${ext}`;
+      const info = await FileSystem.getInfoAsync(uri);
+      if (info.exists) return uri;
+    }
+  } catch {
+    return null;
   }
   return null;
 }
