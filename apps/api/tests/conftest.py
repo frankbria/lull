@@ -12,11 +12,19 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from lull_api.config import settings
 from lull_api.db import Base, get_db
 from lull_api.main import app
 from lull_api import models  # noqa: F401  — register tables on Base.metadata
 
 TEST_DB_URL = "postgresql+psycopg://lull:lull@localhost:5432/lull_test"
+
+
+@pytest.fixture(autouse=True)
+def isolated_audio_store(tmp_path, monkeypatch):
+    """Give each test a fresh on-disk audio cache dir, so the content-addressed dedup cache (US-008)
+    never leaks a render between tests and never writes into the repo."""
+    monkeypatch.setattr(settings, "audio_store_dir", str(tmp_path / "audio_store"))
 
 
 @pytest.fixture(scope="session")

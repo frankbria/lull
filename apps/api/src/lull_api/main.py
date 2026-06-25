@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from pathlib import Path
 from typing import Callable
 
 import jwt
@@ -23,6 +24,7 @@ from .entitlements import (
 from .models import User
 from .moderation import ScriptModerationError, moderate
 from .personas import PREVIEW_TEXT, resolve_voice_id
+from .persistence import persist_track, script_checksum, store_audio
 from .pii import strip_pii
 from .scripts import (
     ScriptSource,
@@ -69,6 +71,11 @@ class ScriptOut(BaseModel):
 class TtsIn(BaseModel):
     text: str
     persona_id: str | None = None  # US-005: which voice to render; None => configured default
+    # US-008: when an authenticated client sends the originating spec (+ resolved components), the
+    # render is persisted as an account-scoped Track with metadata. Optional, so guests and legacy
+    # callers still just get audio back.
+    spec: TrackSpecIn | None = None
+    components: dict[str, str] | None = None
 
 
 @app.get("/health")
@@ -233,6 +240,12 @@ async def tts(
             raise HTTPException(status_code=422, detail="unknown voice persona")
     # Build the source before the gate so a config error (missing key) is a clear 503, as before.
     source = make_source(voice_id)
+    # Dedup key over the exact (text, voice, source): an identical earlier render is served from disk
+    # below instead of re-billing TTS (US-008 AC3). The source is part of the key so a stub WAV never
+    # gets served in place of real ElevenLabs output after a config change.
+    ext = _ext_for_media_type(source.media_type)
+    checksum = script_checksum(text, voice_id, settings.audio_source)
+    cache_path = Path(settings.audio_store_dir).resolve() / f"{checksum}.{ext}"
 
     guest_id: uuid.UUID | None = None
     if user is not None:
@@ -256,13 +269,40 @@ async def tts(
             )
         db.commit()  # commit the reservation before the (slow, billable) synth
 
-    try:
-        audio = await _synthesize(source, text)
-    except HTTPException:
-        if guest_id is not None:
-            release_guest_generation(db, guest_id)  # render failed → don't burn the free credit
-            db.commit()
-        raise
+    # The gate above is per generation request: a guest's one free generation is consumed even on a
+    # cache hit below (they still get a rendered track). The cache saves *our* TTS spend, not the
+    # user's allowance — and charging it closes a free-replay loophole.
+    #
+    # The cache is the content-addressed file on disk (global, so it spares TTS spend for everyone
+    # including guests — not only persisted authed tracks).
+    if cache_path.exists():
+        audio = cache_path.read_bytes()
+        audio_path: str = str(cache_path)
+    else:
+        try:
+            audio = await _synthesize(source, text)
+        except HTTPException:
+            if guest_id is not None:
+                release_guest_generation(db, guest_id)  # render failed → don't burn the free credit
+                db.commit()
+            raise
+        audio_path = store_audio(audio, checksum, ext, settings.audio_store_dir)
+
+    # Persist an account-scoped track with its metadata (US-008 AC1/AC2). Authed only: a guest has
+    # no user row. Needs the originating spec; without it the call is a bare render (no Track).
+    if user is not None and body.spec is not None:
+        spec_dict = body.spec.model_dump()
+        persist_track(
+            db,
+            user_id=user.id,
+            spec=spec_dict,
+            components=body.components or resolve_components(TrackSpec(**spec_dict)),
+            persona_id=body.persona_id,
+            audio_path=audio_path,
+            checksum=checksum,
+            duration_seconds=len(text) / 12.5,  # ~150 wpm pacing; matches /script est_seconds
+            source=settings.audio_source,
+        )
 
     # Authed credit counts successful generations only (free/non-blocking at launch).
     if user is not None:
@@ -280,3 +320,7 @@ async def _synthesize(source: AudioSource, text: str) -> bytes:
             status_code=exc.status_code,
             detail={"message": exc.message, "retryable": exc.retryable},
         ) from exc
+
+
+def _ext_for_media_type(media_type: str) -> str:
+    return "wav" if "wav" in media_type else "mp3"

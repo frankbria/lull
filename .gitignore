@@ -23,6 +23,9 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 
+# Generated audio store (US-008 dedup cache)
+audio_store/
+
 # Native build
 android/app/build/
 ios/build/
