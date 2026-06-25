@@ -66,6 +66,15 @@ describe("ConfirmGenerateModal (US-006)", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled()); // success dismisses the modal
   });
 
+  it("ignores Android back while a generation is in flight", async () => {
+    const onGenerate = jest.fn(() => new Promise<void>(() => {})); // stays pending
+    const { onClose } = renderModal({ onGenerate });
+    fireEvent.press(screen.getByTestId("confirm-generate"));
+    await screen.findByTestId("progress");
+    fireEvent(screen.getByTestId("confirm-modal"), "requestClose"); // Android back
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("estimateGenerationSeconds grows with length and has a sane floor", () => {
     expect(estimateGenerationSeconds(0)).toBeGreaterThan(0);
     expect(estimateGenerationSeconds(2000)).toBeGreaterThan(estimateGenerationSeconds(200));

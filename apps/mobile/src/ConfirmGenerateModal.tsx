@@ -46,7 +46,16 @@ export function ConfirmGenerateModal({ report, onClose, onGenerate }: Props) {
   };
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+    <Modal
+      visible
+      transparent
+      animationType="fade"
+      testID="confirm-modal"
+      // Android hardware back: ignore mid-generation, else the error/retry surface vanishes off-screen.
+      onRequestClose={() => {
+        if (status !== "generating") onClose();
+      }}
+    >
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <Text style={styles.title}>Ready to generate?</Text>
