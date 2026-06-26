@@ -1,0 +1,87 @@
+name: Deploy API
+
+# Continuous deploy of the API to the VPS (#55). On merge to main touching the API, rsync the code
+# and roll the Docker container behind the box's nginx + certbot front. Guarded: a clean no-op until
+# the deploy secrets are set, so the pipeline never blocks on a missing credential.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - ".github/workflows/deploy-api.yml"
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy api to vps
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for deploy secrets
+        id: guard
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          # All four are required; a partial config skips cleanly rather than failing mid-deploy.
+          # DEPLOY_KNOWN_HOSTS pins the host key (no trust-on-first-use against a possibly-spoofed host).
+          if [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_HOST" ] && [ -n "$DEPLOY_USER" ] && [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Note skipped deploy
+        if: steps.guard.outputs.ready != 'true'
+        run: echo "::notice::Deploy secrets (DEPLOY_SSH_KEY/HOST/USER/KNOWN_HOSTS) not all set — skipping API deploy."
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: steps.guard.outputs.ready == 'true'
+
+      - name: Set up SSH
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          # Pinned host key (from the secret) — no ssh-keyscan TOFU on a production deploy path.
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Rsync code to /opt/lull
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          # .env.prod and audio_store are excluded so a deploy never clobbers secrets or the cache.
+          rsync -az --delete \
+            --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
+            --exclude='audio_store' --exclude='.env' --exclude='.env.*' \
+            --exclude='.pytest_cache' --exclude='.ruff_cache' \
+            -e "ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes" \
+            apps/api/ "$DEPLOY_USER@$DEPLOY_HOST:/opt/lull/"
+
+      - name: Build, migrate, restart
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" '
+            set -e
+            cd /opt/lull
+            docker compose -f docker-compose.prod.yml build
+            docker compose -f docker-compose.prod.yml run --rm api uv run --no-dev alembic upgrade head
+            docker compose -f docker-compose.prod.yml up -d'
+
+      - name: Health check
+        if: steps.guard.outputs.ready == 'true'
+        run: curl -fsS --retry 5 --retry-delay 3 https://lull.dev.frankbria.net/health
