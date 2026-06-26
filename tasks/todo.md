@@ -1,61 +1,40 @@
-# P[1.1.8] US-008 — Persist generated track + local cache (issue #15)
+# Issue #48 — Gate /script generation when LLM-backed (cost abuse vector)
 
-**Plan source:** self-authored (issue had no plan comment). Label: `area:api`.
+**Plan source:** self-authored (issue had no plan comment; only CodeRabbit's planner prompt).
+Labels: `sprint:1`, `area:api`, `safety`.
 
-## Acceptance criteria
-- [x] AC1: Generated track saved to backend (account-scoped) + local device cache
-- [x] AC2: Metadata stored: components, voice, duration, hypnosis flag, date
-- [x] AC3: Identical scripts hashed + cache-served to avoid duplicate TTS spend
+## Problem
+In `LULL_SCRIPT_SOURCE=claude` mode, `POST /script` makes a billable Anthropic
+call with no auth/quota/rate-limit gate. Unauthenticated callers can hammer it
+to drive cost. `/tts` is already gated; `/script` is not. Stub mode is free, so
+the vector only exists in a deployed claude-backed env.
 
-**Done.** Demo (live, real Postgres + disk) showed: authed /tts persists Track +
-4 components (ai_chosen correct) + AudioFile (duration/source/checksum/date),
-identical render by a 2nd user served from cache (0 extra synth, 1 shared file,
-2 tracks), different voice re-synthesized. Cache is content-addressed on disk +
-global (guest renders spare later ones). Device cache: mobile audio.ts replays
-by content hash, skipping /tts (jest-verified).
+## Chosen approach (preserves free-preview UX, no client change)
+Per-IP fixed-window **rate limit** on `/script`, active **only in claude (billable) mode**.
+- No guest token required → US-006 free-preview flow unchanged (no friction, no client edit).
+- Bounds repeated billable calls per IP per window → satisfies "cannot be unbounded".
+- Stub mode stays completely ungated → offline dev + existing tests unaffected.
+- Rejected calls return 429 + Retry-After; the LLM call never fires when over limit.
 
-## Key finding
-The data model already exists and was built ahead for exactly this: `Track`
-(spec JSONB, status, created_at, user_id), `TrackComponent` (category, choice,
-ai_chosen), `AudioFile` (path, **checksum index**, duration_seconds, source).
-**No DB migration needed** — only endpoint logic.
+Why not "require a guest token": a token doesn't bound per-token call volume
+(preview consumes no generation), so it adds client friction without capping cost.
+A rate limit is the mechanism that actually bounds cost in-app.
 
-## Design decisions / assumptions
-- **Account-scoped persistence = authed users only.** `Track.user_id` is a NOT
-  NULL FK; guests have no user row, so a guest generation produces audio (and
-  benefits from the dedup cache) but no saved Track. Auth UI is a separate
-  story; the real client currently always uses a guest token, so persistence is
-  exercised via authed API/tests until the auth UI lands. (Known limitation.)
-- **Dedup cache is global** (by checksum over text+voice) so it saves TTS spend
-  for everyone; only the Track *record* is account-scoped.
-- **Voice** stored inside `Track.spec` JSONB (`persona_id` key) — no new column.
-- **Duration** = `len(text)/12.5` (same ~150 wpm heuristic as `/script`
-  est_seconds); real container parsing is out of scope (ponytail).
-- **Local device cache**: key the on-device audio file by a content hash of
-  (text + persona); replay from cache and skip `/tts` on an identical re-render.
+## Steps (TDD)
+1. RED: `tests/test_script_rate_limit.py` — claude mode, fake source; Nth+1 call from
+   same IP → 429; stub mode → no limit; limiter resets per test.
+2. config.py: add `script_rate_limit_per_min: int = 10` (<=0 disables).
+3. main.py: small in-process fixed-window limiter (mirrors `_preview_cache` pattern);
+   check in `generate_script` before `source.generate`, only when source is billable (claude).
+   429 + Retry-After when exceeded.
+4. Docs: `.env.example` + config comment for the new setting.
+5. GREEN: full test suite + ruff/black.
 
-## Steps (TDD: tests first)
-1. **config**: add `audio_store_dir: str = "audio_store"` to `config.py`.
-2. **persistence.py** (new): `script_checksum(text, voice_id)`,
-   `find_cached_audio(db, checksum)`, `store_audio(bytes, checksum, ext, dir)`
-   (write `{checksum}.{ext}`, idempotent), `persist_track(db, user_id, spec,
-   components, persona_id, path, checksum, duration, source)`.
-3. **main.py `/tts`**: compute checksum → cache-lookup before synth (serve
-   cached bytes on hit, skip TTS) → on miss synthesize + store file → if authed
-   and `spec` provided, persist Track + components + AudioFile. Response bytes
-   unchanged (client-compatible).
-4. **TtsIn**: add optional `spec: TrackSpecIn | None` + `components: dict|None`
-   so a full track can be persisted (ai_chosen derived from spec[cat]=="ai").
-5. **mobile audio.ts**: content-hash cache key; reuse cached file / skip `/tts`
-   on identical re-render. Web: in-memory hash→blobURL map.
+## Acceptance
+- [ ] claude mode: `/script` cannot be used as an unbounded billable endpoint by an unauth caller.
+- [ ] Free-preview UX (US-006) preserved (stub unchanged; claude adds only a per-IP ceiling).
 
-## Tests
-- API: persist-on-authed, dedup-skips-synth (count synth calls), global cache
-  hit (guest then authed), guest-creates-no-track, existing tests still green,
-  alembic migration test unchanged (no schema change).
-- Mobile: cache key helper + short-circuit (mocked fetch) skips second /tts.
-
-## Verify
-- [ ] `cd apps/api && uv run pytest` green; ruff + black clean
-- [ ] mobile `pnpm test` green
-- [ ] Demo each AC (Phase 11)
+## Known ceilings (ponytail)
+- In-process limiter: single-instance only; multi-instance needs a shared store (Redis).
+- Behind a reverse proxy, `request.client.host` is the proxy IP unless XFF is honored →
+  becomes a global cap rather than per-client. Documented; edge per-IP is the deploy concern.

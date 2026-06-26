@@ -41,6 +41,10 @@ A single interface fronts all audio so provider/source swaps are **data, not rew
   preferences. `GET /voices/{id}/preview` serves a fixed ~25s sample in that voice — ungated (a
   preview must not burn a free generation) but single-flight cached per persona so the public
   endpoint can't be turned into a billable amplifier.
+- **`/script` cost gate (#48):** the script preview is ungated by design (free, FR-G1), but when
+  `LULL_SCRIPT_SOURCE=claude` each call is a billable LLM request. A per-IP rate limit (active only
+  in claude mode) bounds an unauthenticated caller without touching the free-preview UX; stub mode
+  stays ungated. ponytail: in-process, single-instance — a shared store is the multi-instance step.
 
 ## Data model (initial)
 `User` · `Track` (spec + status) · `TrackComponent` (category, choice, ai_chosen flag) ·

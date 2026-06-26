@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # Hard cap (FR-G6). ~ one 90-min hypnosis script is well under this.
     max_script_chars: int = 60_000
 
+    # Per-IP cost gate for /script in claude mode (issue #48): max billable calls per client IP per
+    # minute. Stub mode is free and stays ungated. <=0 disables the gate (operator escape hatch).
+    script_rate_limit_per_min: int = 10
+
     # Rough ElevenLabs cost estimate, USD per 1k characters (tune against real billing).
     cost_per_1k_chars_usd: float = 0.15
 

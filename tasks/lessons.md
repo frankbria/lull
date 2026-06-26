@@ -152,3 +152,15 @@ A web/RNTL demo + cross-family review caught three things unit tests alone misse
   `voice_id` (None for the default-voice path) serves stale audio after the configured default
   changes; key on the resolved voice + the audio source. Persist component metadata from the
   server-side resolution of the spec, never client-supplied values (which can contradict the spec).
+
+## Gating billable endpoints (from #48 / P[1.1.7a])
+- **Gate the billable path, not the free one.** `/script` is ungated by design (free preview,
+  FR-G1), but in `LULL_SCRIPT_SOURCE=claude` each call is a billable Anthropic request. Gate ONLY
+  the billable mode (`settings.script_source == "claude"`) so stub/offline dev + the free-preview UX
+  stay untouched and existing tests don't need a token. A per-IP rate limit preserves the UX (no
+  client change) where requiring a token would not — and a token wouldn't even cap per-token volume
+  since preview consumes no generation.
+- **In-process rate-limit maps leak without a sweep.** A `dict[ip → window]` keyed by client IP
+  retains one entry per address forever unless that IP returns after its window — an IP-rotating bot
+  grows it unboundedly. Sweep expired buckets once the map crosses a size threshold (O(n) but rare),
+  so steady-state memory is bounded by IPs seen within a window. (codex review caught this.)
