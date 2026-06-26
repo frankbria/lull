@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 import uuid
 from pathlib import Path
@@ -354,6 +355,12 @@ async def tts(
             try:
                 audio = cache_path.read_bytes()
                 audio_path = str(cache_path)
+                # Mark recently-used so the LRU eviction sweep (issue #51) keeps hot renders and
+                # drops cold ones. Best-effort: a failed touch must not fail the request.
+                try:
+                    os.utime(cache_path, None)
+                except OSError:
+                    pass
             except OSError:
                 audio = None  # unreadable cache file → treat as a miss and re-synthesize below
         if audio is None:
@@ -430,7 +437,9 @@ async def _render_single_flight(checksum: str, source: AudioSource, text: str, e
 
         async def render() -> bytes:
             audio = await _synthesize(source, text)
-            store_audio(audio, checksum, ext, settings.audio_store_dir)
+            store_audio(
+                audio, checksum, ext, settings.audio_store_dir, settings.audio_store_max_bytes
+            )
             return audio
 
         task = asyncio.ensure_future(render())

@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # TTS. ponytail: local FS now; object storage / CDN when multi-instance.
     audio_store_dir: str = "audio_store"
 
+    # On-write LRU eviction quota for audio_store_dir (issue #51): when the store exceeds this many
+    # bytes, the oldest (least-recently-used, by mtime) files are deleted until it's back under cap.
+    # Default 1 GiB; <=0 disables eviction.
+    audio_store_max_bytes: int = 1024**3
+
     # Session JWT (HS256). Dev default is fine locally; MUST be overridden in staging/prod via
     # LULL_JWT_SECRET. ponytail: a shared secret + expiry, not a key-rotation service.
     jwt_secret: str = _DEFAULT_JWT_SECRET
