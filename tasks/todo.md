@@ -1,40 +1,38 @@
-# Issue #48 — Gate /script generation when LLM-backed (cost abuse vector)
+# Issue #51 — Audio cache eviction/quota (P[1.1.8a])
 
-**Plan source:** self-authored (issue had no plan comment; only CodeRabbit's planner prompt).
-Labels: `sprint:1`, `area:api`, `safety`.
+**Plan source:** self-authored (no plan comment). Label: `area:api`. Follow-up to #15.
 
 ## Problem
-In `LULL_SCRIPT_SOURCE=claude` mode, `POST /script` makes a billable Anthropic
-call with no auth/quota/rate-limit gate. Unauthenticated callers can hammer it
-to drive cost. `/tts` is already gated; `/script` is not. Stub mode is free, so
-the vector only exists in a deployed claude-backed env.
+`audio_store/` (the content-addressed TTS dedup cache) grows unbounded — no TTL,
+LRU, or size quota. A guest can mint fresh tokens + submit unique scripts, so write
+volume can grow despite edge rate-limiting.
 
-## Chosen approach (preserves free-preview UX, no client change)
-Per-IP fixed-window **rate limit** on `/script`, active **only in claude (billable) mode**.
-- No guest token required → US-006 free-preview flow unchanged (no friction, no client edit).
-- Bounds repeated billable calls per IP per window → satisfies "cannot be unbounded".
-- Stub mode stays completely ungated → offline dev + existing tests unaffected.
-- Rejected calls return 429 + Retry-After; the LLM call never fires when over limit.
+## Chosen approach — on-write LRU eviction to a configurable byte quota
+- `LULL_AUDIO_STORE_MAX_BYTES` (default 1 GiB; `<=0` disables). Bounds disk by design.
+- `evict_audio_store(store_dir, max_bytes)` in persistence.py: if total size > cap,
+  delete files oldest-mtime-first until under cap. Race-tolerant (file may vanish).
+- Called at the end of `store_audio` (on-write check — no background task, ponytail).
+- Cache **hit** touches the file's mtime (`os.utime`) so eviction is true LRU
+  (least-recently-*used*), not just oldest-written — aligns with the issue's mtime keying.
+- No separate TTL sweep: a size quota already bounds disk; TTL is a redundant 2nd knob (YAGNI).
 
-Why not "require a guest token": a token doesn't bound per-token call volume
-(preview consumes no generation), so it adds client friction without capping cost.
-A rate limit is the mechanism that actually bounds cost in-app.
+## Why eviction is safe today
+No endpoint serves audio from `AudioFile.path` — bytes are returned inline + device-cached
+(US-008). So an evicted file just means the next identical render re-synthesizes (correct
+cache behavior). **Known limitation:** once a playback-from-store endpoint lands, eviction
+must exclude account-scoped files (or re-render on miss) — exactly the issue's own
+"only persist cache files for authed generations" follow-up note.
 
 ## Steps (TDD)
-1. RED: `tests/test_script_rate_limit.py` — claude mode, fake source; Nth+1 call from
-   same IP → 429; stub mode → no limit; limiter resets per test.
-2. config.py: add `script_rate_limit_per_min: int = 10` (<=0 disables).
-3. main.py: small in-process fixed-window limiter (mirrors `_preview_cache` pattern);
-   check in `generate_script` before `source.generate`, only when source is billable (claude).
-   429 + Retry-After when exceeded.
-4. Docs: `.env.example` + config comment for the new setting.
-5. GREEN: full test suite + ruff/black.
+1. RED: `tests/test_cache_eviction.py` — evict removes oldest until under quota; keeps newest;
+   `max_bytes<=0` disables; `store_audio` triggers eviction when over cap.
+2. config.py: `audio_store_max_bytes: int = 1024**3`.
+3. persistence.py: `evict_audio_store(...)`; call from `store_audio` (new `max_bytes` arg).
+4. main.py: pass `settings.audio_store_max_bytes` to `store_audio`; `os.utime` on cache hit.
+5. Docs: `.env.example` + update the `store_audio` ponytail comment (the unbounded note is now resolved).
+6. GREEN: full suite + ruff/black.
 
-## Acceptance
-- [ ] claude mode: `/script` cannot be used as an unbounded billable endpoint by an unauth caller.
-- [ ] Free-preview UX (US-006) preserved (stub unchanged; claude adds only a per-IP ceiling).
-
-## Known ceilings (ponytail)
-- In-process limiter: single-instance only; multi-instance needs a shared store (Redis).
-- Behind a reverse proxy, `request.client.host` is the proxy IP unless XFF is honored →
-  becomes a global cap rather than per-client. Documented; edge per-IP is the deploy concern.
+## Acceptance (from issue)
+- [ ] TTL/LRU eviction sweep for `audio_store/` (mtime-keyed). → on-write LRU.
+- [ ] Configurable max store size (`LULL_AUDIO_STORE_MAX_BYTES`).
+- [ ] Edge rate-limiting note (reverse proxy) — deploy verification, documented (not code).

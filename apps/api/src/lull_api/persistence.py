@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import tempfile
 import uuid
 from pathlib import Path
@@ -33,14 +34,14 @@ def script_checksum(text: str, voice_id: str | None, source: str) -> str:
     return h.hexdigest()
 
 
-def store_audio(audio: bytes, checksum: str, ext: str, store_dir: str) -> str:
+def store_audio(audio: bytes, checksum: str, ext: str, store_dir: str, max_bytes: int = 0) -> str:
     """Write the bytes under {checksum}.{ext} and return the path. Atomic: write to a temp file in
     the same dir then os.replace into place, so a concurrent /tts that sees cache_path.exists() never
     reads a half-written file. Idempotent — concurrent misses for the same render write identical
-    bytes, so the final replace is a harmless last-write-wins."""
-    # ponytail: the store grows unbounded — no TTL/LRU eviction or size quota here. Write volume is
-    # bounded by the edge IP rate-limit that already caps guest-token rotation (see auth.py); a TTL/
-    # LRU sweep + disk quota is the upgrade when the volume warrants it (tracked follow-up).
+    bytes, so the final replace is a harmless last-write-wins.
+
+    After writing, an LRU eviction sweep keeps the store under `max_bytes` (issue #51); `max_bytes<=0`
+    leaves it unbounded (the prior behavior)."""
     # Resolve to absolute so the path persisted in the DB is portable: a later cache-hit's
     # Path(path).exists() check must not depend on the server's CWD at request time.
     directory = Path(store_dir).resolve()
@@ -54,7 +55,46 @@ def store_audio(audio: bytes, checksum: str, ext: str, store_dir: str) -> str:
     except OSError:
         Path(tmp_name).unlink(missing_ok=True)  # don't leave a stray temp file on failure
         raise
+    evict_audio_store(str(directory), max_bytes)
     return str(path)
+
+
+def evict_audio_store(store_dir: str, max_bytes: int) -> None:
+    """Keep the on-disk audio cache under `max_bytes` by deleting the oldest files first (LRU by
+    mtime — a cache hit touches mtime, so "oldest" means least-recently-used). On-write check, no
+    background task. `max_bytes<=0` disables it.
+
+    Re-creatable by design: the store is the dedup cache, so an evicted render is just re-synthesized
+    on its next request. ponytail: once an endpoint serves audio from AudioFile.path, eviction must
+    spare account-scoped files (or re-render on miss) — the issue's own follow-up note."""
+    if max_bytes <= 0:
+        return
+    directory = Path(store_dir)
+    if not directory.is_dir():
+        return
+    # Stat once; tolerate a file vanishing mid-scan (another worker's sweep / concurrent eviction).
+    files: list[tuple[float, int, Path]] = []
+    for f in directory.glob("*"):
+        if f.suffix == ".tmp":
+            continue  # an in-flight mkstemp write — deleting it would break a concurrent store
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            continue  # only count finished cache files (skip subdirs etc.)
+        files.append((st.st_mtime, st.st_size, f))
+    total = sum(size for _, size, _ in files)
+    if total <= max_bytes:
+        return
+    for _mtime, size, f in sorted(files):  # oldest mtime first
+        try:
+            f.unlink()
+        except OSError:
+            continue  # already gone — its bytes no longer count; keep going
+        total -= size
+        if total <= max_bytes:
+            break
 
 
 def persist_track(
