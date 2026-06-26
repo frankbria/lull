@@ -88,6 +88,22 @@ ON_LOAD`). This is *not* store distribution (Sprint 6).
    plugin (`android.usesCleartextTraffic: true`). API connectivity for on-device builds is tracked
    with the device-proving work (#24), separate from these delivery rails.
 
+**Reaching the dev API from a standalone APK (dev-TLS over Tailscale, #54)**
+A built APK blocks cleartext, so the dev API needs an HTTPS front. `tailscale serve` terminates TLS
+at `https://<host>.<tailnet>.ts.net` and proxies to local uvicorn — no app change, nothing baked
+into the APK (the durable, Tailscale-free public-API path is #55). One command on the dev box:
+```bash
+cd apps/api
+make dev-tls                 # uvicorn --host 127.0.0.1 --port 8000  +  tailscale serve --bg 8000
+make dev-tls CHECK=--check   # dry run: print the commands, run nothing
+```
+Then point the build's `EXPO_PUBLIC_API_BASE` (EAS env var / repo variable) at the `https://…ts.net`
+host (no trailing slash), and cold-restart the APK. Verify: `curl -v https://<host>.ts.net/health`
+completes the TLS handshake and returns `{"status":"ok",…}`; `tailscale serve status` shows `:8000`
+fronted. uvicorn listens on `127.0.0.1` — `tailscale serve` proxies to loopback, so there's no need
+(and it would leak cleartext) to expose it on other interfaces. The `serve` flags target Tailscale
+≥1.60 — adjust for older versions (the `--check` output shows exactly what runs).
+
 **How updates flow**
 - Merge to `main` → `.github/workflows/eas-update.yml` runs `eas update --channel preview` → the
   installed build **downloads** the new bundle on its next launch and **applies it on the following
