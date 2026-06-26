@@ -91,7 +91,10 @@ ON_LOAD`). This is *not* store distribution (Sprint 6).
 **Reaching the dev API from a standalone APK (dev-TLS over Tailscale, #54)**
 A built APK blocks cleartext, so the dev API needs an HTTPS front. `tailscale serve` terminates TLS
 at `https://<host>.<tailnet>.ts.net` and proxies to local uvicorn — no app change, nothing baked
-into the APK (the durable, Tailscale-free public-API path is #55). One command on the dev box:
+into the APK (the durable, Tailscale-free public-API path is #55). Run this **on the host that
+`EXPO_PUBLIC_API_BASE` points at** — the API must run on the same box whose `*.ts.net` name the APK
+dials (e.g. the VPS), not necessarily your laptop. A mismatch here surfaces as "Network request
+failed" on the device. Then:
 ```bash
 cd apps/api
 make dev-tls                 # runs uvicorn on 127.0.0.1:8000 behind tailscale serve
