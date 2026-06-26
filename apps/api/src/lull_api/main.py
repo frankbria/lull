@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from pathlib import Path
 from typing import Callable
 
 import jwt
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -94,9 +95,42 @@ def get_script_source() -> ScriptSource:
         ) from exc
 
 
+# Per-IP fixed-window rate limit for the billable /script path (issue #48). Stub mode is free and
+# stays ungated; in claude mode each call is a billable Anthropic request, so an unauthenticated
+# caller must not be able to hammer it. ip -> (window_start_monotonic, count_in_window).
+# ponytail: in-process fixed window — single-instance only; a shared store (Redis) is the
+# multi-instance upgrade. Behind a reverse proxy, request.client.host is the proxy IP unless XFF is
+# honored, so this degrades to a single global cap — per-client at the edge is the deploy concern.
+_script_rate: dict[str, tuple[float, int]] = {}
+_SCRIPT_RATE_WINDOW_S = 60.0
+# Drop expired buckets once the map gets large, so an IP-rotating bot can't leak one entry per
+# address for the process lifetime. The sweep is O(n) but runs only past this size, so steady-state
+# cost stays low and memory is bounded by IPs actually seen within a window.
+_SCRIPT_RATE_SWEEP_AT = 1024
+
+
+def _script_rate_retry_after(ip: str, limit: int) -> float | None:
+    """Record a call from `ip`; return None if it's within `limit` for the current window, else the
+    seconds to wait before the window resets. Fixed window: the count resets on the first call after
+    the window elapses."""
+    now = time.monotonic()
+    if len(_script_rate) >= _SCRIPT_RATE_SWEEP_AT:
+        for stale in [k for k, (s, _) in _script_rate.items() if now - s >= _SCRIPT_RATE_WINDOW_S]:
+            del _script_rate[stale]
+    start, count = _script_rate.get(ip, (now, 0))
+    if now - start >= _SCRIPT_RATE_WINDOW_S:
+        start, count = now, 0
+    count += 1
+    _script_rate[ip] = (start, count)
+    if count <= limit:
+        return None
+    return _SCRIPT_RATE_WINDOW_S - (now - start)
+
+
 @app.post("/script", response_model=ScriptOut)
 async def generate_script(
     spec_in: TrackSpecIn,
+    request: Request,
     source: ScriptSource = Depends(get_script_source),
 ) -> ScriptOut:
     """Script first, audio later (FR-G1): returns text to preview + a cost/time estimate.
@@ -104,6 +138,23 @@ async def generate_script(
     Pipeline (PRD §): resolve AI picks -> generate -> moderate BEFORE TTS (FR-G5). A moderation block
     returns a safe 422 so prohibited content is never voiced.
     """
+    # Cost gate (issue #48): in claude mode every call is a billable Anthropic request, so rate-limit
+    # per client IP BEFORE generating — an unauthenticated caller can't drive unbounded spend. Stub
+    # mode is free, so it stays ungated (offline dev + the free-preview UX are unaffected).
+    limit = settings.script_rate_limit_per_min
+    if settings.script_source == "claude" and limit > 0:
+        client_ip = request.client.host if request.client else "unknown"
+        retry_after = _script_rate_retry_after(client_ip, limit)
+        if retry_after is not None:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "too many script requests — please slow down",
+                    "retryable": True,
+                },
+                headers={"Retry-After": str(int(retry_after) + 1)},
+            )
+
     spec = TrackSpec(**spec_in.model_dump())
     try:
         components = resolve_components(spec)
