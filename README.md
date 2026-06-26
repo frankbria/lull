@@ -88,6 +88,29 @@ ON_LOAD`). This is *not* store distribution (Sprint 6).
    plugin (`android.usesCleartextTraffic: true`). API connectivity for on-device builds is tracked
    with the device-proving work (#24), separate from these delivery rails.
 
+**Reaching the dev API from a standalone APK (dev-TLS over Tailscale, #54)**
+A built APK blocks cleartext, so the dev API needs an HTTPS front. `tailscale serve` terminates TLS
+at `https://<host>.<tailnet>.ts.net` and proxies to local uvicorn — no app change, nothing baked
+into the APK (the durable, Tailscale-free public-API path is #55). Run this **on the host that
+`EXPO_PUBLIC_API_BASE` points at** — the API must run on the same box whose `*.ts.net` name the APK
+dials (e.g. the VPS), not necessarily your laptop. A mismatch here surfaces as "Network request
+failed" on the device. Then:
+```bash
+cd apps/api
+make dev-tls                 # runs uvicorn on 127.0.0.1:8000 behind tailscale serve
+make dev-tls CHECK=--check   # dry run: print what it would do, run nothing
+```
+The helper **cooperates with an already-running `tailscale serve`** (the build box's persistent
+front): it leaves an existing serve untouched and just runs uvicorn on the loopback port the serve
+proxies to. Only on a box with *no* serve does it set one up for the session and tear that one down on
+exit. uvicorn listens on `127.0.0.1` — `tailscale serve` proxies to loopback, so exposing other
+interfaces would only leak cleartext.
+
+Point the build's `EXPO_PUBLIC_API_BASE` (EAS env var / repo variable) at the `https://…ts.net` host
+(no trailing slash), and cold-restart the APK. Verify: `tailscale serve status` shows the tailnet
+host proxying to `http://127.0.0.1:8000`, and `curl -v https://<host>.ts.net/health` completes the
+TLS handshake and returns `{"status":"ok",…}`. The `serve` flags target Tailscale ≥1.60.
+
 **How updates flow**
 - Merge to `main` → `.github/workflows/eas-update.yml` runs `eas update --channel preview` → the
   installed build **downloads** the new bundle on its next launch and **applies it on the following
