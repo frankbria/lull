@@ -94,15 +94,19 @@ at `https://<host>.<tailnet>.ts.net` and proxies to local uvicorn — no app cha
 into the APK (the durable, Tailscale-free public-API path is #55). One command on the dev box:
 ```bash
 cd apps/api
-make dev-tls                 # uvicorn --host 127.0.0.1 --port 8000  +  tailscale serve --bg 8000
-make dev-tls CHECK=--check   # dry run: print the commands, run nothing
+make dev-tls                 # runs uvicorn on 127.0.0.1:8000 behind tailscale serve
+make dev-tls CHECK=--check   # dry run: print what it would do, run nothing
 ```
-Then point the build's `EXPO_PUBLIC_API_BASE` (EAS env var / repo variable) at the `https://…ts.net`
-host (no trailing slash), and cold-restart the APK. Verify: `curl -v https://<host>.ts.net/health`
-completes the TLS handshake and returns `{"status":"ok",…}`; `tailscale serve status` shows `:8000`
-fronted. uvicorn listens on `127.0.0.1` — `tailscale serve` proxies to loopback, so there's no need
-(and it would leak cleartext) to expose it on other interfaces. The `serve` flags target Tailscale
-≥1.60 — adjust for older versions (the `--check` output shows exactly what runs).
+The helper **cooperates with an already-running `tailscale serve`** (the build box's persistent
+front): it leaves an existing serve untouched and just runs uvicorn on the loopback port the serve
+proxies to. Only on a box with *no* serve does it set one up for the session and tear that one down on
+exit. uvicorn listens on `127.0.0.1` — `tailscale serve` proxies to loopback, so exposing other
+interfaces would only leak cleartext.
+
+Point the build's `EXPO_PUBLIC_API_BASE` (EAS env var / repo variable) at the `https://…ts.net` host
+(no trailing slash), and cold-restart the APK. Verify: `tailscale serve status` shows the tailnet
+host proxying to `http://127.0.0.1:8000`, and `curl -v https://<host>.ts.net/health` completes the
+TLS handshake and returns `{"status":"ok",…}`. The `serve` flags target Tailscale ≥1.60.
 
 **How updates flow**
 - Merge to `main` → `.github/workflows/eas-update.yml` runs `eas update --channel preview` → the
