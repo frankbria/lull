@@ -164,3 +164,15 @@ A web/RNTL demo + cross-family review caught three things unit tests alone misse
   retains one entry per address forever unless that IP returns after its window — an IP-rotating bot
   grows it unboundedly. Sweep expired buckets once the map crosses a size threshold (O(n) but rare),
   so steady-state memory is bounded by IPs seen within a window. (codex review caught this.)
+
+## Dev-TLS / tailscale serve (from #54)
+- **`tailscale serve` proxies to loopback — bind the dev server to `127.0.0.1`, not `0.0.0.0`.** A
+  tailnet device reaches the API *through* the TLS front (`tailscale serve --bg 8000` →
+  `http://127.0.0.1:8000`), so binding `0.0.0.0` doesn't help reachability and leaks the API in
+  cleartext on every other interface. (codex caught the wrong-premise; the test that asserted
+  `0.0.0.0` was corrected to assert loopback + rationale, not mutated to pass.)
+- **A helper that runs `tailscale serve` must not clobber pre-existing serve config.** `reset` is
+  global, and `--bg` replaces the root handler. Safest lazy contract: **abort up front if ANY serve
+  config exists** (check `tailscale serve status --json` != null/{}), so we only ever start — and only
+  ever `reset` — when there was nothing else to lose. Older `--https=443 off` teardown is unsupported
+  on current CLIs; use `tailscale serve reset`.
