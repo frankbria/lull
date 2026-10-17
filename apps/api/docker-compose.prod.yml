@@ -1,0 +1,17 @@
+# Prod deploy for the Lull API (#55) on the shared VPS, behind the box's existing nginx + certbot.
+#
+# host networking: the API reaches the system Postgres on 127.0.0.1:5432 WITHOUT changing its
+# listen_addresses / pg_hba — so nothing about the shared Postgres (used by other apps) is disturbed.
+# uvicorn binds 127.0.0.1:8020 (loopback only); nginx proxies https://lull.dev.frankbria.net there.
+# Secrets live in .env.prod on the box (never committed).
+services:
+  api:
+    build: .
+    image: lull-api:latest
+    container_name: lull-api
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env.prod
+    volumes:
+      - ./audio_store:/app/audio_store
+    command: uv run --no-dev uvicorn lull_api.main:app --host 127.0.0.1 --port 8020
