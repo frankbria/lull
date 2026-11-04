@@ -6,3 +6,23 @@ nodeLinker: hoisted
 packages:
   - "apps/mobile"
   - "packages/*"
+
+# shortcut: pins patched releases (same major) of transitive Expo SDK 54 tooling deps flagged by
+# Dependabot (#82); drop each once the Expo SDK 58 migration (#84) pulls a fixed version itself.
+overrides:
+  "@xmldom/xmldom@<0.9.0": ^0.8.15
+  "@xmldom/xmldom@>=0.9.0 <1.0.0": ^0.9.12
+  "brace-expansion@<2.0.0": ^1.1.20
+  "brace-expansion@>=2.0.0 <3.0.0": ^2.1.6
+  "brace-expansion@>=5.0.0 <6.0.0": ^5.0.11
+  browserslist: ^4.28.7
+  compression: ^1.8.2
+  "js-yaml@<4.0.0": ^3.15.2
+  "js-yaml@>=4.0.0 <5.0.0": ^4.3.2
+  "nanoid@<4.0.0": ^3.3.18
+  node-forge: ^1.4.1
+  postcss: ^8.5.18
+  shell-quote: ^1.11.0
+  source-map-js: ^1.2.2
+  tar: ^7.5.21
+  "undici@<7.0.0": ^6.29.1
