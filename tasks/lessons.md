@@ -176,3 +176,15 @@ A web/RNTL demo + cross-family review caught three things unit tests alone misse
   config exists** (check `tailscale serve status --json` != null/{}), so we only ever start — and only
   ever `reset` — when there was nothing else to lose. Older `--https=443 off` teardown is unsupported
   on current CLIs; use `tailscale serve reset`.
+
+## Dependency overrides vs. the release cooldown (from #82 / #86 / #87)
+- **A `^x.y.z` override resolves to the newest release, which can be hours old.** #86 pinned
+  `node-forge: ^1.4.1`, pnpm took 1.4.3 (published 4h earlier), and Dependabot's pnpm
+  (`minimum-release-age=20160`, from the 14-day cooldown) then failed every npm update job. The
+  repo now sets `minimumReleaseAge: 20160` in `pnpm-workspace.yaml` so local resolution enforces the
+  same rule. A security fix that is newer than the cooldown gets an **exact** pin to the minimal
+  patched version plus a version-specific `minimumReleaseAgeExclude` entry, never a range.
+- **pnpm won't downgrade an already-locked version that is too new; it errors.** To re-resolve, restore
+  the last good lockfile and reinstall with the age rule in effect. Then check every added version's
+  publish age against the registry before pushing.
+- **`git log -S a -S b` only searches for the last `-S`.** Check each string in its own run.
