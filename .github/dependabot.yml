@@ -1,5 +1,6 @@
 # Dependabot version updates with supply-chain cooldown stepdown:
-# semver ecosystems wait 7d (minor/patch) / 14d (major); others 14d flat.
+# npm waits 7d (minor/patch) / 14d (major); uv and github-actions 14d flat
+# (Dependabot rejects semver-* cooldown keys for github-actions).
 # Security-advisory updates bypass cooldown (GitHub behavior).
 version: 2
 updates:
@@ -41,9 +42,6 @@ updates:
     open-pull-requests-limit: 5
     cooldown:
       default-days: 14
-      semver-major-days: 14
-      semver-minor-days: 7
-      semver-patch-days: 7
     groups:
       security-updates:
         applies-to: security-updates
