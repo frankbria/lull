@@ -38,7 +38,7 @@ jobs:
         run: |
           psql -h localhost -U lull -d lull -c 'CREATE DATABASE lull_test;'
           psql -h localhost -U lull -d lull -c 'CREATE DATABASE lull_migtest;'
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true              # caches uv's download/build cache
           cache-dependency-glob: apps/api/uv.lock
