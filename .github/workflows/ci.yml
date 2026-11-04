@@ -31,7 +31,7 @@ jobs:
           --health-cmd "pg_isready -U lull -d lull"
           --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Create test databases
         env:
           PGPASSWORD: lull
@@ -50,7 +50,7 @@ jobs:
     name: mobile (typecheck + lint + test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4         # version from root package.json packageManager
       - uses: actions/setup-node@v4
         with:
