@@ -1,8 +1,8 @@
 # Issue #55 — Public HTTPS API, Tailscale-free APK (P[0.1.7a])
 
-**Resolved direction:** self-managed **Hostinger VPS** (s878435) — Docker + Caddy (auto Let's
-Encrypt TLS) + Postgres; CI deploys over SSH on merge to main. Compiled APK targets a public
-`https://api.<domain>` — no Tailscale.
+**Shipped:** shared VPS — Docker API on loopback behind the host's nginx + certbot, system
+Postgres (see `apps/api/DEPLOY.md`; the plan below originally assumed Caddy + bundled Postgres).
+Compiled APK targets `https://lull.dev.frankbria.net` — no Tailscale.
 
 ## Repo-side deliverables (me — verifiable locally)
 1. `apps/api/Dockerfile` — build the API image (uv, src, uvicorn). Verify: `docker build`.

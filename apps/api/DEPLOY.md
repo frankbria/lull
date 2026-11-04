@@ -32,11 +32,11 @@ LULL_SCRIPT_SOURCE=stub            # -> claude to enable real LLM scripts (needs
 
 ## Manual deploy / update
 ```bash
-# from a machine with the deploy key:
+# from a machine with the deploy key (user + host: see the operator's local runbook):
 rsync -az --delete --exclude='.venv' --exclude='audio_store' --exclude='.env*' \
   --exclude='__pycache__' --exclude='.pytest_cache' --exclude='.ruff_cache' \
-  apps/api/ root@dev.frankbria.net:/opt/lull/
-ssh root@dev.frankbria.net 'cd /opt/lull &&
+  apps/api/ $DEPLOY_USER@$DEPLOY_HOST:/opt/lull/
+ssh $DEPLOY_USER@$DEPLOY_HOST 'cd /opt/lull &&
   docker compose -f docker-compose.prod.yml build &&
   docker compose -f docker-compose.prod.yml run --rm api uv run --no-dev alembic upgrade head &&
   docker compose -f docker-compose.prod.yml up -d'
