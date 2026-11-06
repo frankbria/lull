@@ -16,7 +16,7 @@
     "@expo/metro-runtime": "~6.1.2",
     "@lull/shared": "workspace:*",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "expo": "~54.0.35",
+    "expo": "~58.0.17",
     "expo-audio": "~1.1.1",
     "expo-constants": "~18.0.13",
     "expo-file-system": "~19.0.23",
